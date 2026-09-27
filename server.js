@@ -87,7 +87,7 @@ io.on('connection',socket=>{
 });
 
 // Serve the web app from the same server, so SpiderGram works as one project.
-app.use(express.static(path.join(ROOT,'..','app')));
-app.get('*',(req,res)=>{if(req.path.startsWith('/api/'))return res.status(404).json({error:'Not found'});res.sendFile(path.join(ROOT,'..','app','index.html'));});
+app.get('/',(req,res)=>res.sendFile(path.join(ROOT,'index.html')));
+app.get('/index.html',(req,res)=>res.sendFile(path.join(ROOT,'index.html')));
 
-server.listen(PORT,()=>console.log(`SpiderGram server listening on port ${PORT}`));
+server.listen(PORT,'0.0.0.0',()=>console.log(`SpiderGram server listening on port ${PORT}`));
