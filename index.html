@@ -77,7 +77,33 @@ async function send(){let t=document.getElementById("msg").value.trim();if(!t)re
 function markRead(){if(peer&&sock)sock.emit("read",{to:peer.id})}
 function notifyTyping(){if(!peer||!sock)return;sock.emit("typing",{to:peer.id,typing:true});clearTimeout(typingTimer);typingTimer=setTimeout(()=>sock.emit("typing",{to:peer.id,typing:false}),900)}
 function sendPhoto(e){const f=e.target.files[0];if(!f||!peer)return;if(f.size>4*1024*1024)return alert("Фото должно быть меньше 4 МБ");const r=new FileReader();r.onload=async()=>{try{let m=await api("/api/messages/"+peer.id,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({type:"image",mediaUrl:r.result})});addMessage(m)}catch(x){alert(x.message)}};r.readAsDataURL(f);e.target.value=""}
-async function toggleRecord(){if(recording){recorder.stop();recording=false;const rb=document.getElementById("mic")||document.getElementById("groupMic");if(rb){rb.classList.remove("recording");rb.innerHTML='<span class="mic-icon">🎙️</span>'};return}if(!navigator.mediaDevices?.getUserMedia)return alert("Запись голоса не поддерживается этим браузером");try{const stream=await navigator.mediaDevices.getUserMedia({audio:true});chunks=[];recorder=new MediaRecorder(stream);recorder.ondataavailable=e=>chunks.push(e.data);recorder.onstop=async()=>{stream.getTracks().forEach(t=>t.stop());const blob=new Blob(chunks,{type:recorder.mimeType||"audio/webm"});if(blob.size>5*1024*1024)return alert("Голосовое слишком большое");const r=new FileReader();r.onload=async()=>{try{let m=currentGroup?await api("/api/groups/"+currentGroup.id+"/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({type:"audio",mediaUrl:r.result})):await api("/api/messages/"+peer.id,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({type:"audio",mediaUrl:r.result})});addMessage(m)}catch(x){alert(x.message)}};r.readAsDataURL(blob)};recorder.start();recording=true;const rb=document.getElementById("mic")||document.getElementById("groupMic");rb.classList.add("recording");rb.innerHTML='<span class="mic-icon">⏹</span>'}catch(e){alert("Разреши доступ к микрофону")}}
+async function toggleRecord(){
+const button=document.getElementById("mic")||document.getElementById("groupMic");
+if(recording){recorder.stop();recording=false;if(button){button.classList.remove("recording");button.innerHTML='<span class="mic-icon">🎙️</span>'}return}
+if(!navigator.mediaDevices?.getUserMedia)return alert("Запись голоса не поддерживается этим браузером");
+try{
+const stream=await navigator.mediaDevices.getUserMedia({audio:true});
+chunks=[];
+recorder=new MediaRecorder(stream);
+recorder.ondataavailable=e=>chunks.push(e.data);
+recorder.onstop=async()=>{
+stream.getTracks().forEach(t=>t.stop());
+const blob=new Blob(chunks,{type:recorder.mimeType||"audio/webm"});
+if(blob.size>5*1024*1024)return alert("Голосовое слишком большое");
+const r=new FileReader();
+r.onload=async()=>{
+try{
+const m=currentGroup?await api("/api/groups/"+currentGroup.id+"/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({type:"audio",mediaUrl:r.result})}):await api("/api/messages/"+peer.id,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({type:"audio",mediaUrl:r.result})});
+addMessage(m);
+}catch(x){alert(x.message)}
+};
+r.readAsDataURL(blob);
+};
+recorder.start();
+recording=true;
+if(button){button.classList.add("recording");button.innerHTML='<span class="mic-icon">⏹</span>'}
+}catch(e){alert("Разреши доступ к микрофону")}
+}
 async function requestNotify(){if("Notification"in window&&Notification.permission==="default")try{await Notification.requestPermission()}catch{}}
 function notifyIncoming(m){if(m.from===user.id||!("Notification"in window)||Notification.permission!=="granted")return;const n=new Notification("SpiderGram",{body:m.type==="image"?"📷 Новое фото":m.type==="audio"?"🎤 Новое голосовое":m.text});setTimeout(()=>n.close(),4000)}
 async function profile(){try{let me=user||await api("/api/me");app.innerHTML=`<div class=top><button class=icon onclick=home()>‹</button><div class=brand>Настройки</div><span></span></div><div class=profile><div class=bigavatar id=bigav>${avatar(me)}</div><input id=avatarFile class=hidden type=file accept="image/*" onchange=changeAvatar(event)><button class=ghost onclick=document.getElementById("avatarFile").click()>Изменить аватар</button><h2>${esc(me.name)}</h2><p>@${esc(me.username)}</p><div class=section><h3>АККАУНТ</h3><input id=pn class=field value="${esc(me.name)}"><button class=primary onclick=saveProfile()>Сохранить профиль</button></div><div class=section><h3>ТЕМА</h3><div class=chips><button class="chip ${(settings.theme||"light")==="light"?"active":""}" onclick=setTheme("light")>☀️ Светлая</button><button class="chip ${settings.theme==="dark"?"active":""}" onclick=setTheme("dark")>🌙 Тёмная</button><button class="chip ${settings.theme==="system"?"active":""}" onclick=setTheme("system")>📱 Системная</button></div></div><div class=section><h3>ОФОРМЛЕНИЕ</h3><div class=setting><span>Цвет интерфейса</span><input type=color value="${settings.accent||"#1688ff"}" onchange=setAccent(this.value)></div><div class=setting><span>Фон чатов</span><button class=chip onclick=document.getElementById("bgFile").click()>Выбрать</button></div><input id=bgFile class=hidden type=file accept="image/*" onchange=setBackground(event)><button class=ghost onclick=clearBackground()>Сбросить фон</button></div><div class=section><h3>УВЕДОМЛЕНИЯ</h3><button class=primary onclick=requestNotify()>Разрешить уведомления</button><div class=notice>Уведомления работают, когда браузер разрешил их для SpiderGram.</div></div><button class=ghost onclick=logout()>Выйти из аккаунта</button></div>`}catch(e){alert("Не удалось открыть настройки: "+e.message);home()}}
