@@ -168,7 +168,39 @@ async function lastMessagesFor(uid){
   }
   return out.sort((a,b)=>b.last.createdAt-a.last.createdAt);
 }
-app.get('/api/chats',auth,async(req,res)=>res.json(await lastMessagesFor(req.user.id)));app.get('/api/groups',auth,async(req,res)=>{
+app.get('/api/chats',auth,async(req,res)=>res.json(await lastMessagesFor(req.user.id)));app.get('/api/groups/:id',auth,async(req,res)=>{
+ const r=await pool.query(`SELECT g.id,g.name,g.avatar,g.created_by,g.created_at,
+ (SELECT COUNT(*) FROM group_members WHERE group_id=g.id)::int members FROM groups g
+ JOIN group_members gm ON gm.group_id=g.id WHERE g.id=$1 AND gm.user_id=$2`,[req.params.id,req.user.id]);
+ if(!r.rowCount)return res.status(404).json({error:'Группа не найдена'});
+ const m=await pool.query(`SELECT u.id,u.username,u.name,u.avatar,u.online,u.last_seen,gm.role FROM group_members gm JOIN users u ON u.id=gm.user_id WHERE gm.group_id=$1 ORDER BY gm.role DESC,u.name`,[req.params.id]);
+ res.json({...r.rows[0],members:m.rows.map(publicUser).map((u,i)=>({...u,role:m.rows[i].role}))});
+});
+app.post('/api/groups/:id/members',auth,async(req,res)=>{
+ const uid=String(req.body.userId||'');
+ const admin=await pool.query('SELECT role FROM group_members WHERE group_id=$1 AND user_id=$2',[req.params.id,req.user.id]);
+ if(!admin.rowCount||admin.rows[0].role!=='admin')return res.status(403).json({error:'Только администратор может добавлять участников'});
+ if(!await getUser(uid))return res.status(404).json({error:'Пользователь не найден'});
+ await pool.query('INSERT INTO group_members(group_id,user_id,role,joined_at) VALUES($1,$2,\'member\',$3) ON CONFLICT DO NOTHING',[req.params.id,uid,Date.now()]);
+ res.json({ok:true});
+});
+app.delete('/api/groups/:id/members/:uid',auth,async(req,res)=>{
+ const admin=await pool.query('SELECT role FROM group_members WHERE group_id=$1 AND user_id=$2',[req.params.id,req.user.id]);
+ if(!admin.rowCount||admin.rows[0].role!=='admin')return res.status(403).json({error:'Только администратор может удалять участников'});
+ if(req.params.uid===req.user.id)return res.status(400).json({error:'Нельзя удалить самого себя'});
+ await pool.query('DELETE FROM group_members WHERE group_id=$1 AND user_id=$2',[req.params.id,req.params.uid]);
+ res.json({ok:true});
+});
+app.patch('/api/groups/:id',auth,async(req,res)=>{
+ const admin=await pool.query('SELECT role FROM group_members WHERE group_id=$1 AND user_id=$2',[req.params.id,req.user.id]);
+ if(!admin.rowCount||admin.rows[0].role!=='admin')return res.status(403).json({error:'Только администратор может менять группу'});
+ const name=typeof req.body.name==='string'?req.body.name.trim().slice(0,40):null;
+ const avatar=typeof req.body.avatar==='string'?req.body.avatar:null;
+ if(avatar&&avatar.length>2800000)return res.status(413).json({error:'Аватар слишком большой'});
+ const r=await pool.query('UPDATE groups SET name=COALESCE($1,name),avatar=COALESCE($2,avatar) WHERE id=$3 RETURNING *',[name,avatar,req.params.id]);
+ res.json(r.rows[0]);
+});
+app.get('/api/groups',auth,async(req,res)=>{
  const r=await pool.query(`SELECT g.*,gm.role,(SELECT COUNT(*) FROM group_members x WHERE x.group_id=g.id) members FROM groups g JOIN group_members gm ON gm.group_id=g.id AND gm.user_id=$1 ORDER BY g.created_at DESC`,[req.user.id]);
  res.json(r.rows.map(g=>({id:g.id,name:g.name,avatar:g.avatar,createdBy:g.created_by,createdAt:Number(g.created_at),role:g.role,members:Number(g.members)})));
 });
