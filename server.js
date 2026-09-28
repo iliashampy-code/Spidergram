@@ -288,13 +288,13 @@ app.post('/api/messages/:id/pin',auth,async(req,res)=>{
 app.patch('/api/messages/:id',auth,async(req,res)=>{
   const text=String(req.body.text||'').trim();
   if(!text||text.length>4000)return res.status(400).json({error:'Сообщение пустое или слишком длинное'});
-  const r=await pool.query('UPDATE messages SET text=$1,edited=true WHERE id=$2 AND "from"=$3 AND type=\'text\' AND deleted=false RETURNING id,"from","to",text,type,media_url,created_at,edited,deleted',[text,req.params.id,req.user.id]);
+  const r=await pool.query("UPDATE messages SET text=$1,edited=true WHERE id=$2 AND \"from\"=$3 AND type='text' AND deleted=false RETURNING id,\"from\",\"to\",text,type,media_url,created_at,edited,deleted",[text,req.params.id,req.user.id]);
   if(!r.rowCount)return res.status(404).json({error:'Сообщение не найдено или его нельзя изменить'});
   const m=r.rows[0]; const out={id:m.id,from:m.from,to:m.to,text:m.text,type:m.type,mediaUrl:m.media_url,createdAt:Number(m.created_at),edited:true,deleted:false,reactions:[]};
   io.to(m.to).emit('message:update',out); io.to(m.from).emit('message:update',out); res.json(out);
 });
 app.delete('/api/messages/:id',auth,async(req,res)=>{
-  const r=await pool.query('UPDATE messages SET text=\'\',media_url=\'\',type=\'deleted\',deleted=true WHERE id=$1 AND "from"=$2 AND deleted=false RETURNING id,"from","to",created_at');
+  const r=await pool.query("UPDATE messages SET text='',media_url='',type='deleted',deleted=true WHERE id=$1 AND \"from\"=$2 AND deleted=false RETURNING id,\"from\",\"to\",created_at",[req.params.id,req.user.id]);
   if(!r.rowCount)return res.status(404).json({error:'Сообщение не найдено или его нельзя удалить'});
   const m=r.rows[0]; const out={id:m.id,from:m.from,to:m.to,text:'Сообщение удалено',type:'deleted',mediaUrl:'',createdAt:Number(m.created_at),edited:false,deleted:true,reactions:[]};
   io.to(m.to).emit('message:update',out); io.to(m.from).emit('message:update',out); res.json(out);
