@@ -53,6 +53,8 @@ async function initDb(){
     CREATE INDEX IF NOT EXISTS group_messages_idx ON group_messages(group_id,created_at);
     ALTER TABLE messages ADD COLUMN IF NOT EXISTS edited BOOLEAN NOT NULL DEFAULT FALSE;
     ALTER TABLE messages ADD COLUMN IF NOT EXISTS deleted BOOLEAN NOT NULL DEFAULT FALSE;
+    ALTER TABLE messages ADD COLUMN IF NOT EXISTS reply_to TEXT;
+    CREATE TABLE IF NOT EXISTS pinned_messages(message_id TEXT PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,pinned_at BIGINT NOT NULL);
     CREATE TABLE IF NOT EXISTS reactions(
       message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
       user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
