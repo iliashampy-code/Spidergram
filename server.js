@@ -11,7 +11,7 @@ const app=express();const server=http.createServer(app);
 const io=new Server(server,{cors:{origin:true,credentials:true}});
 app.use(cors({origin:true,credentials:true}));app.use(express.json({limit:'10mb'}));
 const ROOT=__dirname,DB=path.join(ROOT,'db.json');
-const SECRET=process.env.JWT_SECRET||'CHANGE_THIS_SPIDERGRAM_SECRET_2026');const PORT=Number(process.env.PORT||3000);
+const SECRET=process.env.JWT_SECRET||'CHANGE_THIS_SPIDERGRAM_SECRET_2026';const PORT=Number(process.env.PORT||3000);
 let db;try{db=fs.existsSync(DB)?JSON.parse(fs.readFileSync(DB,'utf8')):{users:[],messages:[]};}catch{db={users:[],messages:[]};}
 db.users ||= [];db.messages ||= [];function save(){fs.writeFileSync(DB,JSON.stringify(db,null,2));}
 const id=()=>crypto.randomUUID();const publicUser=u=>({id:u.id,username:u.username,name:u.name||u.username,avatar:u.avatar||'',online:!!u.online,lastSeen:u.lastSeen||null});
