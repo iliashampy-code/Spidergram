@@ -181,21 +181,21 @@ app.get('/api/chats',auth,async(req,res)=>res.json(await lastMessagesFor(req.use
 app.post('/api/groups/:id/members',auth,async(req,res)=>{
  const uid=String(req.body.userId||'');
  const admin=await pool.query('SELECT role FROM group_members WHERE group_id=$1 AND user_id=$2',[req.params.id,req.user.id]);
- if(!admin.rowCount||admin.rows[0].role!=='admin')return res.status(403).json({error:'Только администратор может добавлять участников'});
+ if(!admin.rowCount||!['admin','owner'].includes(admin.rows[0].role))return res.status(403).json({error:'Только администратор может добавлять участников'});
  if(!await getUser(uid))return res.status(404).json({error:'Пользователь не найден'});
  await pool.query('INSERT INTO group_members(group_id,user_id,role,joined_at) VALUES($1,$2,\'member\',$3) ON CONFLICT DO NOTHING',[req.params.id,uid,Date.now()]);
  res.json({ok:true});
 });
 app.delete('/api/groups/:id/members/:uid',auth,async(req,res)=>{
  const admin=await pool.query('SELECT role FROM group_members WHERE group_id=$1 AND user_id=$2',[req.params.id,req.user.id]);
- if(!admin.rowCount||admin.rows[0].role!=='admin')return res.status(403).json({error:'Только администратор может удалять участников'});
+ if(!admin.rowCount||!['admin','owner'].includes(admin.rows[0].role))return res.status(403).json({error:'Только администратор может удалять участников'});
  if(req.params.uid===req.user.id)return res.status(400).json({error:'Нельзя удалить самого себя'});
  await pool.query('DELETE FROM group_members WHERE group_id=$1 AND user_id=$2',[req.params.id,req.params.uid]);
  res.json({ok:true});
 });
 app.patch('/api/groups/:id',auth,async(req,res)=>{
  const admin=await pool.query('SELECT role FROM group_members WHERE group_id=$1 AND user_id=$2',[req.params.id,req.user.id]);
- if(!admin.rowCount||admin.rows[0].role!=='admin')return res.status(403).json({error:'Только администратор может менять группу'});
+ if(!admin.rowCount||!['admin','owner'].includes(admin.rows[0].role))return res.status(403).json({error:'Только администратор может менять группу'});
  const name=typeof req.body.name==='string'?req.body.name.trim().slice(0,40):null;
  const avatar=typeof req.body.avatar==='string'?req.body.avatar:null;
  if(avatar&&avatar.length>2800000)return res.status(413).json({error:'Аватар слишком большой'});
