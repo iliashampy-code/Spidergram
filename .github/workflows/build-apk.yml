@@ -1,13 +1,21 @@
 name: Build SpiderGram APK
-on: push
+on:
+  push:
+    paths:
+      - 'android-app/**'
+      - '.github/workflows/build-apk.yml'
+  workflow_dispatch:
 jobs:
- build:
-  runs-on: ubuntu-latest
-  steps:
-   - uses: actions/checkout@v4
-   - uses: android-actions/setup-android@v3
-   - uses: gradle/actions/setup-gradle@v4
-     with: {gradle-version: '8.10'}
-   - run: gradle -p android-app :app:assembleDebug --no-daemon
-   - uses: actions/upload-artifact@v4
-     with: {name: SpiderGram-APK, path: android-app/app/build/outputs/apk/debug/app-debug.apk}
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.10'
+      - run: gradle -p android-app :app:assembleDebug --no-daemon
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SpiderGram-APK
+          path: android-app/app/build/outputs/apk/debug/app-debug.apk
