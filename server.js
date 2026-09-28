@@ -47,6 +47,10 @@ async function initDb(){
     );
     CREATE INDEX IF NOT EXISTS messages_pair_idx ON messages("from","to",created_at);
     CREATE INDEX IF NOT EXISTS users_username_idx ON users(username);
+    CREATE TABLE IF NOT EXISTS groups(id TEXT PRIMARY KEY,name TEXT NOT NULL,avatar TEXT NOT NULL DEFAULT '',created_by TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,created_at BIGINT NOT NULL);
+    CREATE TABLE IF NOT EXISTS group_members(group_id TEXT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,role TEXT NOT NULL DEFAULT 'member',joined_at BIGINT NOT NULL,PRIMARY KEY(group_id,user_id));
+    CREATE TABLE IF NOT EXISTS group_messages(id TEXT PRIMARY KEY,group_id TEXT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,"from" TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,text TEXT NOT NULL DEFAULT '',type TEXT NOT NULL DEFAULT 'text',media_url TEXT NOT NULL DEFAULT '',created_at BIGINT NOT NULL,edited BOOLEAN NOT NULL DEFAULT FALSE,deleted BOOLEAN NOT NULL DEFAULT FALSE);
+    CREATE INDEX IF NOT EXISTS group_messages_idx ON group_messages(group_id,created_at);
     ALTER TABLE messages ADD COLUMN IF NOT EXISTS edited BOOLEAN NOT NULL DEFAULT FALSE;
     ALTER TABLE messages ADD COLUMN IF NOT EXISTS deleted BOOLEAN NOT NULL DEFAULT FALSE;
     CREATE TABLE IF NOT EXISTS reactions(
@@ -142,7 +146,39 @@ async function lastMessagesFor(uid){
   }
   return out.sort((a,b)=>b.last.createdAt-a.last.createdAt);
 }
-app.get('/api/chats',auth,async(req,res)=>res.json(await lastMessagesFor(req.user.id)));
+app.get('/api/chats',auth,async(req,res)=>res.json(await lastMessagesFor(req.user.id)));app.get('/api/groups',auth,async(req,res)=>{
+ const r=await pool.query(`SELECT g.*,gm.role,(SELECT COUNT(*) FROM group_members x WHERE x.group_id=g.id) members FROM groups g JOIN group_members gm ON gm.group_id=g.id AND gm.user_id=$1 ORDER BY g.created_at DESC`,[req.user.id]);
+ res.json(r.rows.map(g=>({id:g.id,name:g.name,avatar:g.avatar,createdBy:g.created_by,createdAt:Number(g.created_at),role:g.role,members:Number(g.members)})));
+});
+app.post('/api/groups',auth,async(req,res)=>{
+ const name=String(req.body.name||'').trim().slice(0,40); if(!name)return res.status(400).json({error:'Введите название группы'});
+ const gid=id(),now=Date.now();
+ await pool.query('BEGIN'); try{
+  await pool.query('INSERT INTO groups(id,name,created_by,created_at) VALUES($1,$2,$3,$4)',[gid,name,req.user.id,now]);
+  await pool.query('INSERT INTO group_members(group_id,user_id,role,joined_at) VALUES($1,$2,\'owner\',$3)',[gid,req.user.id,now]);
+  await pool.query('COMMIT'); res.json({id:gid,name,createdBy:req.user.id,createdAt:now,role:'owner',members:1});
+ }catch(e){await pool.query('ROLLBACK');res.status(500).json({error:'Не удалось создать группу'});}
+});
+app.post('/api/groups/:id/members',auth,async(req,res)=>{
+ const uid=String(req.body.userId||''); const g=await pool.query('SELECT 1 FROM group_members WHERE group_id=$1 AND user_id=$2',[req.params.id,req.user.id]);
+ if(!g.rowCount)return res.status(403).json({error:'Вы не участник группы'});
+ if(!await getUser(uid))return res.status(404).json({error:'Пользователь не найден'});
+ await pool.query('INSERT INTO group_members(group_id,user_id,role,joined_at) VALUES($1,$2,\'member\',$3) ON CONFLICT DO NOTHING',[req.params.id,uid,Date.now()]);
+ res.json({ok:true});
+});
+app.get('/api/groups/:id/messages',auth,async(req,res)=>{
+ const mem=await pool.query('SELECT 1 FROM group_members WHERE group_id=$1 AND user_id=$2',[req.params.id,req.user.id]); if(!mem.rowCount)return res.status(403).json({error:'Нет доступа'});
+ const r=await pool.query('SELECT id,"from",text,type,media_url,created_at,edited,deleted FROM group_messages WHERE group_id=$1 ORDER BY created_at ASC LIMIT 500',[req.params.id]);
+ res.json(r.rows.map(m=>({id:m.id,from:m.from,text:m.deleted?'Сообщение удалено':m.text,type:m.deleted?'deleted':m.type,mediaUrl:m.deleted?'':m.media_url,createdAt:Number(m.created_at),edited:!!m.edited,deleted:!!m.deleted,reactions:[]})));
+});
+app.post('/api/groups/:id/messages',auth,async(req,res)=>{
+ const mem=await pool.query('SELECT 1 FROM group_members WHERE group_id=$1 AND user_id=$2',[req.params.id,req.user.id]); if(!mem.rowCount)return res.status(403).json({error:'Нет доступа'});
+ const text=String(req.body.text||'').trim(); if(!text||text.length>4000)return res.status(400).json({error:'Сообщение пустое или слишком длинное'});
+ const m={id:id(),groupId:req.params.id,from:req.user.id,text,type:'text',mediaUrl:'',createdAt:Date.now(),edited:false,deleted:false};
+ await pool.query('INSERT INTO group_messages(id,group_id,"from",text,type,created_at) VALUES($1,$2,$3,$4,$5,$6)',[m.id,m.groupId,m.from,m.text,m.type,m.createdAt]);
+ const members=await pool.query('SELECT user_id FROM group_members WHERE group_id=$1',[req.params.id]); members.rows.forEach(x=>io.to(x.user_id).emit('group:message',m)); res.json(m);
+});
+
 
 app.get('/api/messages/:uid',auth,async(req,res)=>{
   const other=await getUser(req.params.uid);
