@@ -47,6 +47,15 @@ async function initDb(){
     );
     CREATE INDEX IF NOT EXISTS messages_pair_idx ON messages("from","to",created_at);
     CREATE INDEX IF NOT EXISTS users_username_idx ON users(username);
+    ALTER TABLE messages ADD COLUMN IF NOT EXISTS edited BOOLEAN NOT NULL DEFAULT FALSE;
+    ALTER TABLE messages ADD COLUMN IF NOT EXISTS deleted BOOLEAN NOT NULL DEFAULT FALSE;
+    CREATE TABLE IF NOT EXISTS reactions(
+      message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      emoji TEXT NOT NULL,
+      PRIMARY KEY(message_id,user_id,emoji)
+    );
+    CREATE INDEX IF NOT EXISTS reactions_message_idx ON reactions(message_id);
   `);
 }
 
@@ -138,8 +147,11 @@ app.get('/api/chats',auth,async(req,res)=>res.json(await lastMessagesFor(req.use
 app.get('/api/messages/:uid',auth,async(req,res)=>{
   const other=await getUser(req.params.uid);
   if(!other)return res.status(404).json({error:'Пользователь не найден'});
-  const r=await pool.query(`SELECT id,"from","to",text,type,media_url,created_at FROM messages WHERE ("from"=$1 AND "to"=$2) OR ("from"=$2 AND "to"=$1) ORDER BY created_at DESC LIMIT 300`,[req.user.id,req.params.uid]);
-  res.json(r.rows.reverse().map(m=>({id:m.id,from:m.from,to:m.to,text:m.text,type:m.type,mediaUrl:m.media_url,createdAt:Number(m.created_at)})));
+  const r=await pool.query(`SELECT id,"from","to",text,type,media_url,created_at,edited,deleted FROM messages WHERE ("from"=$1 AND "to"=$2) OR ("from"=$2 AND "to"=$1) ORDER BY created_at DESC LIMIT 300`,[req.user.id,req.params.uid]);
+  const ids=r.rows.map(m=>m.id);
+  let rx=[];
+  if(ids.length){const q=await pool.query('SELECT message_id,user_id,emoji FROM reactions WHERE message_id=ANY($1)',[ids]);rx=q.rows;}
+  res.json(r.rows.reverse().map(m=>({id:m.id,from:m.from,to:m.to,text:m.deleted?'Сообщение удалено':m.text,type:m.deleted?'deleted':m.type,mediaUrl:m.deleted?'':m.media_url,createdAt:Number(m.created_at),edited:!!m.edited,deleted:!!m.deleted,reactions:rx.filter(x=>x.message_id===m.id).map(x=>({userId:x.user_id,emoji:x.emoji}))})));
 });
 
 app.post('/api/messages/:uid',auth,async(req,res)=>{
@@ -150,12 +162,36 @@ app.post('/api/messages/:uid',auth,async(req,res)=>{
   else if(type==='image'){if(!mediaUrl.startsWith('data:image/'))return res.status(400).json({error:'Некорректное изображение'});if(mediaUrl.length>5600000)return res.status(413).json({error:'Фото слишком большое'});}
   else if(type==='audio'){if(!mediaUrl.startsWith('data:audio/'))return res.status(400).json({error:'Некорректное аудио'});if(mediaUrl.length>7000000)return res.status(413).json({error:'Голосовое слишком большое'});}
   else return res.status(400).json({error:'Неизвестный тип сообщения'});
-  const m={id:id(),from:req.user.id,to,text:type==='text'?text:'',type,mediaUrl:type==='text'?'':mediaUrl,createdAt:Date.now()};
+  const m={id:id(),from:req.user.id,to,text:type==='text'?text:'',type,mediaUrl:type==='text'?'':mediaUrl,createdAt:Date.now(),edited:false,deleted:false,reactions:[]};
   await pool.query('INSERT INTO messages(id,"from","to",text,type,media_url,created_at) VALUES($1,$2,$3,$4,$5,$6,$7)',[m.id,m.from,m.to,m.text,m.type,m.mediaUrl,m.createdAt]);
   io.to(to).emit('message',m);
   res.json(m);
 });
 
+app.patch('/api/messages/:id',auth,async(req,res)=>{
+  const text=String(req.body.text||'').trim();
+  if(!text||text.length>4000)return res.status(400).json({error:'Сообщение пустое или слишком длинное'});
+  const r=await pool.query('UPDATE messages SET text=$1,edited=true WHERE id=$2 AND "from"=$3 AND type=\'text\' AND deleted=false RETURNING id,"from","to",text,type,media_url,created_at,edited,deleted',[text,req.params.id,req.user.id]);
+  if(!r.rowCount)return res.status(404).json({error:'Сообщение не найдено или его нельзя изменить'});
+  const m=r.rows[0]; const out={id:m.id,from:m.from,to:m.to,text:m.text,type:m.type,mediaUrl:m.media_url,createdAt:Number(m.created_at),edited:true,deleted:false,reactions:[]};
+  io.to(m.to).emit('message:update',out); io.to(m.from).emit('message:update',out); res.json(out);
+});
+app.delete('/api/messages/:id',auth,async(req,res)=>{
+  const r=await pool.query('UPDATE messages SET text=\'\',media_url=\'\',type=\'deleted\',deleted=true WHERE id=$1 AND "from"=$2 AND deleted=false RETURNING id,"from","to",created_at');
+  if(!r.rowCount)return res.status(404).json({error:'Сообщение не найдено или его нельзя удалить'});
+  const m=r.rows[0]; const out={id:m.id,from:m.from,to:m.to,text:'Сообщение удалено',type:'deleted',mediaUrl:'',createdAt:Number(m.created_at),edited:false,deleted:true,reactions:[]};
+  io.to(m.to).emit('message:update',out); io.to(m.from).emit('message:update',out); res.json(out);
+});
+app.post('/api/messages/:id/reactions',auth,async(req,res)=>{
+  const emoji=String(req.body.emoji||'').trim(); if(!['❤️','👍','😂','😮','😢','🔥'].includes(emoji))return res.status(400).json({error:'Недопустимая реакция'});
+  const m=await pool.query('SELECT "from","to" FROM messages WHERE id=$1',[req.params.id]); if(!m.rowCount)return res.status(404).json({error:'Сообщение не найдено'});
+  const old=await pool.query('SELECT 1 FROM reactions WHERE message_id=$1 AND user_id=$2 AND emoji=$3',[req.params.id,req.user.id,emoji]);
+  if(old.rowCount)await pool.query('DELETE FROM reactions WHERE message_id=$1 AND user_id=$2 AND emoji=$3',[req.params.id,req.user.id,emoji]);
+  else await pool.query('INSERT INTO reactions(message_id,user_id,emoji) VALUES($1,$2,$3) ON CONFLICT DO NOTHING',[req.params.id,req.user.id,emoji]);
+  const rr=await pool.query('SELECT user_id,emoji FROM reactions WHERE message_id=$1',[req.params.id]);
+  const out={messageId:req.params.id,reactions:rr.rows.map(x=>({userId:x.user_id,emoji:x.emoji}))};
+  io.to(m.rows[0].to).emit('reaction',out); io.to(m.rows[0].from).emit('reaction',out); res.json(out);
+});
 io.use((socket,next)=>{try{socket.user=jwt.verify(socket.handshake.auth?.token||'',SECRET);next();}catch{next(new Error('Unauthorized'));}});
 io.on('connection',async socket=>{
   const u=await getUser(socket.user.id);
