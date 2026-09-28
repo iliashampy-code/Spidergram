@@ -36,7 +36,7 @@ function safeJSON(key,fallback){try{const raw=localStorage.getItem(key);return r
 user=safeJSON("sgUser",null);
 const settings=safeJSON("sgSettings",{});
 const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
-function applySettings(){const theme=settings.theme||"light";document.body.classList.toggle("dark",theme==="dark");document.documentElement.style.setProperty("--accent",settings.accent||"#1688ff");if(settings.bg){document.documentElement.style.setProperty("--messages-bg",`url(${settings.bg})`)}}
+function applySettings(){const theme=settings.theme||"light";document.body.classList.toggle("dark",theme==="dark");document.documentElement.style.setProperty("--accent",settings.accent||"#1688ff");if(settings.bg){document.documentElement.style.setProperty("--messages","url(${settings.bg})")}}
 applySettings();
 async function api(path,opt={}){opt.headers={...(opt.headers||{}),...(token?{Authorization:"Bearer "+token}:{})};let r=await fetch(base+path,opt),d=await r.json().catch(()=>({}));if(r.status===401){localStorage.removeItem("sgToken");localStorage.removeItem("sgUser");token=null;user=null;if(sock)sock.disconnect();login();throw Error("Сессия истекла. Войдите в аккаунт заново")}if(!r.ok)throw Error(d.error||"Ошибка");return d}
 function avatar(u,big=false){const n=esc((u?.name||u?.username||"?")[0].toUpperCase());return u?.avatar?'<img src="'+esc(u.avatar)+'" alt="">':n}
