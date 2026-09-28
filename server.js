@@ -10,7 +10,8 @@ const crypto=require('crypto');
 const app=express();const server=http.createServer(app);
 const io=new Server(server,{cors:{origin:true,credentials:true}});
 app.use(cors({origin:true,credentials:true}));app.use(express.json({limit:'10mb'}));
-const ROOT=__dirname,DB=path.join(ROOT,'db.json');
+const ROOT=__dirname,DATA_DIR=process.env.DATA_DIR||path.join(ROOT,'data'),DB=path.join(DATA_DIR,'db.json');
+fs.mkdirSync(DATA_DIR,{recursive:true});
 const SECRET=process.env.JWT_SECRET||'CHANGE_THIS_SPIDERGRAM_SECRET_2026';const PORT=Number(process.env.PORT||3000);
 let db;try{db=fs.existsSync(DB)?JSON.parse(fs.readFileSync(DB,'utf8')):{users:[],messages:[]};}catch{db={users:[],messages:[]};}
 db.users ||= [];db.messages ||= [];function save(){fs.writeFileSync(DB,JSON.stringify(db,null,2));}
