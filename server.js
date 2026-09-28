@@ -60,6 +60,28 @@ async function initDb(){
       PRIMARY KEY(message_id,user_id,emoji)
     );
     CREATE INDEX IF NOT EXISTS reactions_message_idx ON reactions(message_id);
+    CREATE TABLE IF NOT EXISTS groups(
+     id TEXT PRIMARY KEY,name TEXT NOT NULL,avatar TEXT NOT NULL DEFAULT '',
+     created_by TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,created_at BIGINT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS group_members(
+     group_id TEXT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+     user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+     role TEXT NOT NULL DEFAULT 'member',joined_at BIGINT NOT NULL,
+     PRIMARY KEY(group_id,user_id)
+    );
+    CREATE TABLE IF NOT EXISTS group_messages(
+     id TEXT PRIMARY KEY,group_id TEXT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+     "from" TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+     text TEXT NOT NULL DEFAULT '',type TEXT NOT NULL,media_url TEXT NOT NULL DEFAULT '',
+     created_at BIGINT NOT NULL,edited BOOLEAN NOT NULL DEFAULT FALSE,deleted BOOLEAN NOT NULL DEFAULT FALSE
+    );
+    CREATE INDEX IF NOT EXISTS group_messages_idx ON group_messages(group_id,created_at);
+    CREATE TABLE IF NOT EXISTS conversation_reads(
+     user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+     peer_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+     last_read_at BIGINT NOT NULL DEFAULT 0,PRIMARY KEY(user_id,peer_id)
+    );
   `);
 }
 
@@ -227,6 +249,53 @@ app.post('/api/messages/:id/reactions',auth,async(req,res)=>{
   const rr=await pool.query('SELECT user_id,emoji FROM reactions WHERE message_id=$1',[req.params.id]);
   const out={messageId:req.params.id,reactions:rr.rows.map(x=>({userId:x.user_id,emoji:x.emoji}))};
   io.to(m.rows[0].to).emit('reaction',out); io.to(m.rows[0].from).emit('reaction',out); res.json(out);
+});
+app.get('/api/groups',auth,async(req,res)=>{
+ const r=await pool.query(`SELECT g.id,g.name,g.avatar,COUNT(gm2.user_id)::int AS members
+ FROM groups g JOIN group_members gm ON gm.group_id=g.id
+ LEFT JOIN group_members gm2 ON gm2.group_id=g.id WHERE gm.user_id=$1
+ GROUP BY g.id ORDER BY g.created_at DESC`,[req.user.id]);
+ res.json(r.rows);
+});
+app.post('/api/groups',auth,async(req,res)=>{
+ const name=String(req.body.name||'').trim().slice(0,40),members=Array.isArray(req.body.members)?req.body.members.map(String):[];
+ if(!name)return res.status(400).json({error:'Введите название группы'});
+ const gid=id(),now=Date.now(),client=await pool.connect();
+ try{
+  await client.query('BEGIN');
+  await client.query('INSERT INTO groups(id,name,created_by,created_at) VALUES($1,$2,$3,$4)',[gid,name,req.user.id,now]);
+  for(const uid of [...new Set([req.user.id,...members])]) await client.query('INSERT INTO group_members(group_id,user_id,role,joined_at) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING',[gid,uid,uid===req.user.id?'admin':'member',now]);
+  await client.query('COMMIT');res.json({id:gid,name,avatar:'',members:[...new Set([req.user.id,...members])].length});
+ }catch(e){await client.query('ROLLBACK');res.status(500).json({error:'Не удалось создать группу'});}finally{client.release();}
+});
+app.get('/api/groups/:id/messages',auth,async(req,res)=>{
+ const ok=await pool.query('SELECT 1 FROM group_members WHERE group_id=$1 AND user_id=$2',[req.params.id,req.user.id]);
+ if(!ok.rowCount)return res.status(403).json({error:'Нет доступа'});
+ const r=await pool.query('SELECT id,"from",text,type,media_url,created_at,edited,deleted FROM group_messages WHERE group_id=$1 ORDER BY created_at DESC LIMIT 300',[req.params.id]);
+ res.json(r.rows.reverse().map(m=>({id:m.id,from:m.from,text:m.deleted?'Сообщение удалено':m.text,type:m.deleted?'deleted':m.type,mediaUrl:m.deleted?'':m.media_url,createdAt:Number(m.created_at),edited:!!m.edited,deleted:!!m.deleted})));
+});
+app.post('/api/groups/:id/messages',auth,async(req,res)=>{
+ const ok=await pool.query('SELECT 1 FROM group_members WHERE group_id=$1 AND user_id=$2',[req.params.id,req.user.id]);
+ if(!ok.rowCount)return res.status(403).json({error:'Нет доступа'});
+ const type=String(req.body.type||'text'),text=String(req.body.text||'').trim(),mediaUrl=String(req.body.mediaUrl||'');
+ if(type==='text'&&(!text||text.length>4000))return res.status(400).json({error:'Сообщение пустое или слишком длинное'});
+ if(type==='image'&&!mediaUrl.startsWith('data:image/'))return res.status(400).json({error:'Некорректное изображение'});
+ if(type==='audio'&&!mediaUrl.startsWith('data:audio/'))return res.status(400).json({error:'Некорректное аудио'});
+ const m={id:id(),groupId:req.params.id,from:req.user.id,text:type==='text'?text:'',type,mediaUrl:type==='text'?'':mediaUrl,createdAt:Date.now(),edited:false,deleted:false};
+ await pool.query('INSERT INTO group_messages(id,group_id,"from",text,type,media_url,created_at) VALUES($1,$2,$3,$4,$5,$6,$7)',[m.id,m.groupId,m.from,m.text,m.type,m.mediaUrl,m.createdAt]);
+ const ms=await pool.query('SELECT user_id FROM group_members WHERE group_id=$1',[m.groupId]);
+ ms.rows.forEach(x=>io.to(x.user_id).emit('group:message',m));res.json(m);
+});
+app.get('/api/messages/search',auth,async(req,res)=>{
+ const q=String(req.query.q||'').trim();if(q.length<2)return res.json([]);
+ const r=await pool.query(`SELECT m.id,m."from",m."to",m.text,m.created_at,u.name,u.username
+ FROM messages m JOIN users u ON u.id=m."from"
+ WHERE (m."from"=$1 OR m."to"=$1) AND m.deleted=false AND m.text ILIKE '%'||$2||'%' ORDER BY m.created_at DESC LIMIT 100`,[req.user.id,q]);
+ res.json(r.rows.map(m=>({id:m.id,from:m.from,to:m.to,text:m.text,createdAt:Number(m.created_at),author:m.name,username:m.username})));
+});
+app.post('/api/messages/:uid/read',auth,async(req,res)=>{
+ const now=Date.now();await pool.query(`INSERT INTO conversation_reads(user_id,peer_id,last_read_at) VALUES($1,$2,$3)
+ ON CONFLICT(user_id,peer_id) DO UPDATE SET last_read_at=EXCLUDED.last_read_at`,[req.user.id,req.params.uid,now]);res.json({ok:true});
 });
 io.use((socket,next)=>{try{socket.user=jwt.verify(socket.handshake.auth?.token||'',SECRET);next();}catch{next(new Error('Unauthorized'));}});
 io.on('connection',async socket=>{
