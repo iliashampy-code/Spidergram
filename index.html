@@ -77,7 +77,8 @@ document.getElementById("memberResults").innerHTML=available.length?available.ma
 }catch(e){document.getElementById("memberResults").innerHTML="<div class=empty>"+esc(e.message)+"</div>"}
 },250);
 }
-document.getElementById("memberResults")?.addEventListener("click",e=>{const b=e.target.closest("[data-add-member]");if(b)addGroupMember(b.dataset.addMember)});\nasync function addGroupMember(uid){
+document.getElementById("memberResults")?.addEventListener("click",e=>{const b=e.target.closest("[data-add-member]");if(b)addGroupMember(b.dataset.addMember)});
+async function addGroupMember(uid){
 try{await api("/api/groups/"+currentGroup.id+"/members",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({userId:uid})});showAddMembers()}catch(e){alert(e.message)}
 }
 function showUserProfile(x){
