@@ -73,11 +73,11 @@ const users=await api("/api/users?q="+encodeURIComponent(q));
 const g=await api("/api/groups/"+currentGroup.id);
 const ids=new Set(g.members.map(m=>m.id));
 const available=users.filter(u=>!ids.has(u.id));
-document.getElementById("memberResults").innerHTML=available.length?available.map(u=>"<div class=chat><div class=avatar>"+avatar(u)+"</div><div class=chattext><div class=chatname>"+esc(u.name)+"</div><div class=preview>@"+esc(u.username)+"</div></div><button class=chip onclick='addGroupMember("+JSON.stringify(u.id)+")'>Добавить</button></div>").join(""):"<div class=empty>Никого не найдено</div>";
+document.getElementById("memberResults").innerHTML=available.length?available.map(u=>'<div class=chat><div class=avatar>'+avatar(u)+'</div><div class=chattext><div class=chatname>'+esc(u.name)+'</div><div class=preview>@'+esc(u.username)+'</div></div><button class=chip data-add-member="'+u.id+'">Добавить</button></div>').join(""):"<div class=empty>Никого не найдено</div>";
 }catch(e){document.getElementById("memberResults").innerHTML="<div class=empty>"+esc(e.message)+"</div>"}
 },250);
 }
-async function addGroupMember(uid){
+document.getElementById("memberResults")?.addEventListener("click",e=>{const b=e.target.closest("[data-add-member]");if(b)addGroupMember(b.dataset.addMember)});\nasync function addGroupMember(uid){
 try{await api("/api/groups/"+currentGroup.id+"/members",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({userId:uid})});showAddMembers()}catch(e){alert(e.message)}
 }
 function showUserProfile(x){
