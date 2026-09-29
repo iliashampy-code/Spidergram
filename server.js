@@ -57,6 +57,7 @@ async function initDb(){
       custom_title TEXT NOT NULL DEFAULT '',
       admin_check BOOLEAN NOT NULL DEFAULT FALSE
     );
+    CREATE TABLE IF NOT EXISTS user_awards(user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,title TEXT NOT NULL DEFAULT '',verified BOOLEAN NOT NULL DEFAULT FALSE);
     CREATE TABLE IF NOT EXISTS messages(
       id TEXT PRIMARY KEY,
       "from" TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -164,7 +165,7 @@ app.post('/api/login',async(req,res)=>{
 app.get('/api/me',auth,async(req,res)=>{
   const u=await getUser(req.user.id);
   if(!u)return res.status(404).json({error:'Пользователь не найден'});
-  res.json(publicUser(u));
+  res.json(await publicUserAsync(u));
 });
 
 app.patch('/api/me',auth,async(req,res)=>{
@@ -174,9 +175,23 @@ app.patch('/api/me',auth,async(req,res)=>{
   const avatar=typeof req.body.avatar==='string'?req.body.avatar:u.avatar;
   if(avatar.length>2800000)return res.status(413).json({error:'Аватар слишком большой'});
   const r=await pool.query('UPDATE users SET name=$1,avatar=$2 WHERE id=$3 RETURNING *',[name,avatar,u.id]);
-  res.json(publicUser(r.rows[0]));
+  res.json(await publicUserAsync(r.rows[0]));
 });
 
+app.get('/api/admin/awards',auth,async(req,res)=>{
+ const me=await getUser(req.user.id);if(!isAdminUser(me))return res.status(403).json({error:'Доступ только для @dobry'});
+ const q=String(req.query.q||'').trim().toLowerCase();
+ const r=await pool.query(`SELECT u.id,u.username,u.name,a.title,a.verified FROM users u LEFT JOIN user_awards a ON a.user_id=u.id WHERE u.username ILIKE '%'||$1||'%' OR u.name ILIKE '%'||$1||'%' ORDER BY u.username LIMIT 50`,[q]);
+ res.json(r.rows);
+});
+app.patch('/api/admin/awards/:uid',auth,async(req,res)=>{
+ const me=await getUser(req.user.id);if(!isAdminUser(me))return res.status(403).json({error:'Доступ только для @dobry'});
+ const target=await getUser(req.params.uid);if(!target)return res.status(404).json({error:'Пользователь не найден'});
+ const title=typeof req.body.title==='string'?req.body.title.trim().slice(0,60):'';const verified=!!req.body.verified;
+ if(!title&&!verified){await pool.query('DELETE FROM user_awards WHERE user_id=$1',[target.id]);return res.json({ok:true,title:'',verified:false});}
+ await pool.query('INSERT INTO user_awards(user_id,title,verified) VALUES($1,$2,$3) ON CONFLICT(user_id) DO UPDATE SET title=EXCLUDED.title,verified=EXCLUDED.verified',[target.id,title,verified]);
+ res.json({ok:true,title,verified});
+});
 app.get('/api/rewards',auth,async(req,res)=>{
  const u=await getUser(req.user.id);
  const days=Math.max(0,Math.floor((Date.now()-Number(u.created_at||Date.now()))/86400000));
@@ -193,7 +208,7 @@ app.get('/api/stats',auth,async(req,res)=>{try{const [u,m,g,o]=await Promise.all
 app.get('/api/users',auth,async(req,res)=>{
   const q=String(req.query.q||'').trim().toLowerCase();
   const r=await pool.query(`SELECT * FROM users WHERE id<>$1 AND ($2='' OR username ILIKE '%'||$2||'%' OR name ILIKE '%'||$2||'%') ORDER BY username LIMIT 50`,[req.user.id,q]);
-  res.json(r.rows.map(publicUser));
+  const out=[];for(const u of r.rows)out.push(await publicUserAsync(u));res.json(out);
 });
 
 async function lastMessagesFor(uid){
@@ -209,7 +224,7 @@ async function lastMessagesFor(uid){
   const out=[];
   for(const m of r.rows){
     const u=await getUser(m.other_id);
-    if(u)out.push({user:publicUser(u),last:{id:m.id,from:m.from,to:m.to,text:m.text,type:m.type,mediaUrl:m.media_url,createdAt:Number(m.created_at)}});
+    if(u)out.push({user:await publicUserAsync(u),last:{id:m.id,from:m.from,to:m.to,text:m.text,type:m.type,mediaUrl:m.media_url,createdAt:Number(m.created_at)}});
   }
   return out.sort((a,b)=>b.last.createdAt-a.last.createdAt);
 }
