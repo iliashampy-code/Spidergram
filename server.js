@@ -181,11 +181,22 @@ app.get('/api/me',auth,async(req,res)=>{
 app.patch('/api/me',auth,async(req,res)=>{
   const u=await getUser(req.user.id);
   if(!u)return res.status(404).json({error:'Пользователь не найден'});
-  const name=typeof req.body.name==='string'?(req.body.name.trim().slice(0,40)||u.username):u.name;
+  const name=typeof req.body.name==='string'?(req.body.name.trim().slice(0,40)||u.name||u.username):u.name;
+  const username=typeof req.body.username==='string'?req.body.username.trim().toLowerCase():u.username;
   const avatar=typeof req.body.avatar==='string'?req.body.avatar:u.avatar;
+  if(!/^[a-z0-9_]{3,24}$/.test(username))return res.status(400).json({error:'Ник: 3–24 латинских символа, цифры или _'});
+  if(username!==u.username){
+    const exists=await pool.query('SELECT 1 FROM users WHERE username=$1 AND id<>$2',[username,u.id]);
+    if(exists.rowCount)return res.status(409).json({error:'Такой ник уже занят'});
+  }
   if(avatar.length>2800000)return res.status(413).json({error:'Аватар слишком большой'});
-  const r=await pool.query('UPDATE users SET name=$1,avatar=$2 WHERE id=$3 RETURNING *',[name,avatar,u.id]);
-  res.json(publicUser(r.rows[0]));
+  try{
+    const r=await pool.query('UPDATE users SET username=$1,name=$2,avatar=$3 WHERE id=$4 RETURNING *',[username,name,avatar,u.id]);
+    res.json(publicUser(r.rows[0]));
+  }catch(e){
+    if(e?.code==='23505')return res.status(409).json({error:'Такой ник уже занят'});
+    res.status(500).json({error:'Не удалось сохранить профиль'});
+  }
 });
 app.patch('/api/me/title',auth,async(req,res)=>{
   const u=await getUser(req.user.id);if(!u)return res.status(404).json({error:'Пользователь не найден'});
