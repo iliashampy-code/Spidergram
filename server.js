@@ -39,7 +39,7 @@ function currentReward(days){
  const all=rewardForDays(days);
  return all.filter(r=>r.type==='title'&&days>=r.days).pop()||null;
 }
-const publicUser=u=>({id:u.id,username:u.username,name:u.name||u.username,avatar:u.avatar||'',online:!!u.online,lastSeen:u.last_seen||null,customTitle:u.custom_title||'',adminCheck:!!u.admin_check,days:Math.max(0,Math.floor((Date.now()-Number(u.created_at||Date.now()))/86400000)),title:currentReward(Math.max(0,Math.floor((Date.now()-Number(u.created_at||Date.now()))/86400000))) });
+const publicUser=u=>({id:u.id,username:u.username,name:u.name||u.username,avatar:u.avatar||'',online:!!u.online,lastSeen:u.last_seen||null,customTitle:u.custom_title||'',adminCheck:!!u.admin_check,selectedTitle:u.selected_title||'',days:Math.max(0,Math.floor((Date.now()-Number(u.created_at||Date.now()))/86400000)),title:currentReward(Math.max(0,Math.floor((Date.now()-Number(u.created_at||Date.now()))/86400000))) });
 const makeToken=u=>jwt.sign({id:u.id},SECRET,{expiresIn:'30d'});
 
 async function initDb(){
@@ -55,7 +55,8 @@ async function initDb(){
       online BOOLEAN NOT NULL DEFAULT FALSE,
       last_seen BIGINT,
       custom_title TEXT NOT NULL DEFAULT '',
-      admin_check BOOLEAN NOT NULL DEFAULT FALSE
+      admin_check BOOLEAN NOT NULL DEFAULT FALSE,
+      selected_title TEXT NOT NULL DEFAULT ''
     );
     CREATE TABLE IF NOT EXISTS user_awards(user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,title TEXT NOT NULL DEFAULT '',verified BOOLEAN NOT NULL DEFAULT FALSE);
     CREATE TABLE IF NOT EXISTS messages(
@@ -71,6 +72,7 @@ async function initDb(){
     CREATE INDEX IF NOT EXISTS users_username_idx ON users(username);
     ALTER TABLE users ADD COLUMN IF NOT EXISTS custom_title TEXT NOT NULL DEFAULT '';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS admin_check BOOLEAN NOT NULL DEFAULT FALSE;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS selected_title TEXT NOT NULL DEFAULT '';
     CREATE TABLE IF NOT EXISTS groups(id TEXT PRIMARY KEY,name TEXT NOT NULL,avatar TEXT NOT NULL DEFAULT '',created_by TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,created_at BIGINT NOT NULL);
     CREATE TABLE IF NOT EXISTS group_members(group_id TEXT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,role TEXT NOT NULL DEFAULT 'member',joined_at BIGINT NOT NULL,PRIMARY KEY(group_id,user_id));
     CREATE TABLE IF NOT EXISTS group_messages(id TEXT PRIMARY KEY,group_id TEXT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,"from" TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,text TEXT NOT NULL DEFAULT '',type TEXT NOT NULL DEFAULT 'text',media_url TEXT NOT NULL DEFAULT '',created_at BIGINT NOT NULL,edited BOOLEAN NOT NULL DEFAULT FALSE,deleted BOOLEAN NOT NULL DEFAULT FALSE);
@@ -183,6 +185,17 @@ app.patch('/api/me',auth,async(req,res)=>{
   const avatar=typeof req.body.avatar==='string'?req.body.avatar:u.avatar;
   if(avatar.length>2800000)return res.status(413).json({error:'Аватар слишком большой'});
   const r=await pool.query('UPDATE users SET name=$1,avatar=$2 WHERE id=$3 RETURNING *',[name,avatar,u.id]);
+  res.json(publicUser(r.rows[0]));
+});
+app.patch('/api/me/title',auth,async(req,res)=>{
+  const u=await getUser(req.user.id);if(!u)return res.status(404).json({error:'Пользователь не найден'});
+  const title=String(req.body.title||'').trim().slice(0,60);
+  if(title){
+    const days=Math.max(0,Math.floor((Date.now()-Number(u.created_at||Date.now()))/86400000));
+    const allowed=rewardForDays(days).find(x=>x.type==='title'&&x.name===title);
+    if(!allowed)return res.status(400).json({error:'Этот титул ещё не открыт'});
+  }
+  const r=await pool.query('UPDATE users SET selected_title=$1 WHERE id=$2 RETURNING *',[title,u.id]);
   res.json(publicUser(r.rows[0]));
 });
 
