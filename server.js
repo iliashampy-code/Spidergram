@@ -116,6 +116,14 @@ async function initDb(){
      last_read_at BIGINT NOT NULL DEFAULT 0,PRIMARY KEY(user_id,peer_id)
     );
   `);
+  const resetPassword=String(process.env.DOBRY_RESET_PASSWORD||'');
+  if(resetPassword){
+    if(resetPassword.length<6) throw new Error('DOBRY_RESET_PASSWORD должен содержать минимум 6 символов');
+    const hashed=await bcrypt.hash(resetPassword,12);
+    const reset=await pool.query('UPDATE users SET password=$1 WHERE username=$2 RETURNING id',[hashed,'dobry']);
+    if(!reset.rowCount) throw new Error('Пользователь @dobry не найден');
+    console.log('Пароль @dobry обновлён через DOBRY_RESET_PASSWORD');
+  }
 }
 
 async function getUser(uid){
