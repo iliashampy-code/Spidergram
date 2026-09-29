@@ -117,6 +117,14 @@ async function initDb(){
      peer_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
      last_read_at BIGINT NOT NULL DEFAULT 0,PRIMARY KEY(user_id,peer_id)
     );
+    CREATE TABLE IF NOT EXISTS call_notifications(
+      id TEXT PRIMARY KEY,
+      to_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      from_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      created_at BIGINT NOT NULL,
+      read BOOLEAN NOT NULL DEFAULT FALSE
+    );
+    CREATE INDEX IF NOT EXISTS call_notifications_to_idx ON call_notifications(to_user_id,read,created_at);
   `);
   const resetPassword=String(process.env.DOBRY_RESET_PASSWORD||'');
   if(resetPassword){
@@ -234,6 +242,22 @@ app.get('/api/rewards',auth,async(req,res)=>{
 function isOwnerAdmin(u){return String(u?.username||'').toLowerCase()==='dobry'}
 async function requireOwnerAdmin(req,res){const u=await getUser(req.user.id);if(!isOwnerAdmin(u)){res.status(403).json({error:'Доступ только для @dobry'});return null}return u}
 app.get('/api/admin/users',auth,async(req,res)=>{const admin=await requireOwnerAdmin(req,res);if(!admin)return;const q=String(req.query.q||'').trim().toLowerCase();const r=await pool.query("SELECT * FROM users WHERE ($1='' OR username ILIKE '%'||$1||'%' OR name ILIKE '%'||$1||'%') ORDER BY username LIMIT 50",[q]);res.json(r.rows.map(publicUser))});
+app.post('/api/users/:id/call',auth,async(req,res)=>{
+  if(req.params.id===req.user.id)return res.status(400).json({error:'Нельзя позвать самого себя'});
+  const target=await getUser(req.params.id);if(!target)return res.status(404).json({error:'Пользователь не найден'});
+  const me=await getUser(req.user.id);
+  const recent=await pool.query('SELECT 1 FROM call_notifications WHERE to_user_id=$1 AND from_user_id=$2 AND created_at>$3 LIMIT 1',[target.id,me.id,Date.now()-60000]);
+  if(recent.rowCount)return res.status(429).json({error:'Можно отправлять приглашение этому пользователю не чаще одного раза в минуту'});
+  const n={id:id(),to_user_id:target.id,from_user_id:me.id,created_at:Date.now()};
+  await pool.query('INSERT INTO call_notifications(id,to_user_id,from_user_id,created_at,read) VALUES($1,$2,$3,$4,false)',[n.id,n.to_user_id,n.from_user_id,n.created_at]);
+  io.to(target.id).emit('call:notify',{id:n.id,from:publicUser(me),createdAt:n.created_at});
+  res.json({ok:true});
+});
+app.get('/api/notifications',auth,async(req,res)=>{
+  const r=await pool.query('SELECT n.id,n.created_at,u.username,u.name,u.avatar FROM call_notifications n JOIN users u ON u.id=n.from_user_id WHERE n.to_user_id=$1 AND n.read=false ORDER BY n.created_at DESC LIMIT 20',[req.user.id]);
+  await pool.query('UPDATE call_notifications SET read=true WHERE to_user_id=$1 AND read=false',[req.user.id]);
+  res.json(r.rows.map(x=>({id:x.id,type:'call',from:{id:x.from_user_id,username:x.username,name:x.name,avatar:x.avatar||''},createdAt:Number(x.created_at)})));
+});
 app.patch('/api/admin/users/:id/title',auth,async(req,res)=>{const admin=await requireOwnerAdmin(req,res);if(!admin)return;const title=String(req.body.title||'').trim().slice(0,50);const target=await getUser(req.params.id);if(!target)return res.status(404).json({error:'Пользователь не найден'});await pool.query('UPDATE users SET custom_title=$1 WHERE id=$2',[title,target.id]);res.json(publicUser(await getUser(target.id)))});
 app.patch('/api/admin/users/:id/check',auth,async(req,res)=>{const admin=await requireOwnerAdmin(req,res);if(!admin)return;const target=await getUser(req.params.id);if(!target)return res.status(404).json({error:'Пользователь не найден'});const enabled=req.body.enabled!==false;await pool.query('UPDATE users SET admin_check=$1 WHERE id=$2',[enabled,target.id]);res.json(publicUser(await getUser(target.id)))});
 app.get('/api/stats',auth,async(req,res)=>{try{const [u,m,g,o]=await Promise.all([pool.query('SELECT COUNT(*)::int count FROM users'),pool.query('SELECT COUNT(*)::int count FROM messages'),pool.query('SELECT COUNT(*)::int count FROM groups'),pool.query('SELECT COUNT(*)::int count FROM users WHERE online=true')]);res.json({users:u.rows[0].count,messages:m.rows[0].count,groups:g.rows[0].count,online:o.rows[0].count})}catch(e){res.status(500).json({error:'Не удалось загрузить статистику'})}});
