@@ -23,13 +23,13 @@ const id=()=>crypto.randomUUID();
 function rewardForDays(days){
  const rewards=[
   {key:'day1',days:1,name:'Новичок',type:'title',start:'#1688ff',end:'#1688ff'},
-  {key:'day10',days:10,name:'Освоился',type:'badge',start:'#8b5cf6',end:'#c084fc'},
+  {key:'day10',days:10,name:'Освоился',type:'title',start:'#a855f7',end:'#e9d5ff'},
   {key:'day20',days:20,name:'Местный гангстер',type:'title',start:'#f5c542',end:'#ffd86b'},
   {key:'day45',days:45,name:'Добрый',type:'title',start:'#35c46a',end:'#8bea9d'},
   {key:'day60',days:60,name:'Знаток системы',type:'title',start:'#163b8f',end:'#2856c7'},
   {key:'day70',days:70,name:'Паучиха',type:'title',start:'#ffffff',end:'#d9d9ff'},
   {key:'day100',days:100,name:'Ветеран',type:'title',start:'#3b82f6',end:'#ffffff'},
-  {key:'day150',days:150,name:'Со стажем',type:'title',start:'#ec4899',end:'#ffffff',check:true},
+  {key:'day150',days:150,name:'Со стажем',type:'title',start:'#ec4899',end:'#ffffff'},
   {key:'day200',days:200,name:'Крепкий орешек',type:'title',start:'#14532d',end:'#a3e635'},
   {key:'day356',days:356,name:'легенда не по званию',type:'title',start:'#8b5cf6',end:'#f0abfc'}
  ];
@@ -39,7 +39,7 @@ function currentReward(days){
  const all=rewardForDays(days);
  return all.filter(r=>r.type==='title'&&days>=r.days).pop()||null;
 }
-const publicUser=u=>({id:u.id,username:u.username,name:u.name||u.username,avatar:u.avatar||'',online:!!u.online,lastSeen:u.last_seen||null,days:Math.max(0,Math.floor((Date.now()-Number(u.created_at||Date.now()))/86400000)),title:currentReward(Math.max(0,Math.floor((Date.now()-Number(u.created_at||Date.now()))/86400000))) });
+const publicUser=u=>({id:u.id,username:u.username,name:u.name||u.username,avatar:u.avatar||'',online:!!u.online,lastSeen:u.last_seen||null,customTitle:u.custom_title||'',adminCheck:!!u.admin_check,days:Math.max(0,Math.floor((Date.now()-Number(u.created_at||Date.now()))/86400000)),title:currentReward(Math.max(0,Math.floor((Date.now()-Number(u.created_at||Date.now()))/86400000))) });
 const makeToken=u=>jwt.sign({id:u.id},SECRET,{expiresIn:'30d'});
 
 async function initDb(){
@@ -53,7 +53,9 @@ async function initDb(){
       avatar TEXT NOT NULL DEFAULT '',
       created_at BIGINT NOT NULL,
       online BOOLEAN NOT NULL DEFAULT FALSE,
-      last_seen BIGINT
+      last_seen BIGINT,
+      custom_title TEXT NOT NULL DEFAULT '',
+      admin_check BOOLEAN NOT NULL DEFAULT FALSE
     );
     CREATE TABLE IF NOT EXISTS messages(
       id TEXT PRIMARY KEY,
@@ -66,6 +68,8 @@ async function initDb(){
     );
     CREATE INDEX IF NOT EXISTS messages_pair_idx ON messages("from","to",created_at);
     CREATE INDEX IF NOT EXISTS users_username_idx ON users(username);
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS custom_title TEXT NOT NULL DEFAULT '';
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS admin_check BOOLEAN NOT NULL DEFAULT FALSE;
     CREATE TABLE IF NOT EXISTS groups(id TEXT PRIMARY KEY,name TEXT NOT NULL,avatar TEXT NOT NULL DEFAULT '',created_by TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,created_at BIGINT NOT NULL);
     CREATE TABLE IF NOT EXISTS group_members(group_id TEXT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,role TEXT NOT NULL DEFAULT 'member',joined_at BIGINT NOT NULL,PRIMARY KEY(group_id,user_id));
     CREATE TABLE IF NOT EXISTS group_messages(id TEXT PRIMARY KEY,group_id TEXT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,"from" TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,text TEXT NOT NULL DEFAULT '',type TEXT NOT NULL DEFAULT 'text',media_url TEXT NOT NULL DEFAULT '',created_at BIGINT NOT NULL,edited BOOLEAN NOT NULL DEFAULT FALSE,deleted BOOLEAN NOT NULL DEFAULT FALSE);
@@ -180,6 +184,11 @@ app.get('/api/rewards',auth,async(req,res)=>{
  const next=rewards.find(r=>!r.unlocked)||null;
  res.json({days,rewards,current:currentReward(days),next,progress:next?Math.min(100,Math.round(days/next.days*100)):100});
 });
+function isOwnerAdmin(u){return String(u?.username||'').toLowerCase()==='dobry'}
+async function requireOwnerAdmin(req,res){const u=await getUser(req.user.id);if(!isOwnerAdmin(u)){res.status(403).json({error:'Доступ только для @dobry'});return null}return u}
+app.get('/api/admin/users',auth,async(req,res)=>{const admin=await requireOwnerAdmin(req,res);if(!admin)return;const q=String(req.query.q||'').trim().toLowerCase();const r=await pool.query("SELECT * FROM users WHERE ($1='' OR username ILIKE '%'||$1||'%' OR name ILIKE '%'||$1||'%') ORDER BY username LIMIT 50",[q]);res.json(r.rows.map(publicUser))});
+app.patch('/api/admin/users/:id/title',auth,async(req,res)=>{const admin=await requireOwnerAdmin(req,res);if(!admin)return;const title=String(req.body.title||'').trim().slice(0,50);const target=await getUser(req.params.id);if(!target)return res.status(404).json({error:'Пользователь не найден'});await pool.query('UPDATE users SET custom_title=$1 WHERE id=$2',[title,target.id]);res.json(publicUser(await getUser(target.id)))});
+app.patch('/api/admin/users/:id/check',auth,async(req,res)=>{const admin=await requireOwnerAdmin(req,res);if(!admin)return;const target=await getUser(req.params.id);if(!target)return res.status(404).json({error:'Пользователь не найден'});const enabled=req.body.enabled!==false;await pool.query('UPDATE users SET admin_check=$1 WHERE id=$2',[enabled,target.id]);res.json(publicUser(await getUser(target.id)))});
 app.get('/api/stats',auth,async(req,res)=>{try{const [u,m,g,o]=await Promise.all([pool.query('SELECT COUNT(*)::int count FROM users'),pool.query('SELECT COUNT(*)::int count FROM messages'),pool.query('SELECT COUNT(*)::int count FROM groups'),pool.query('SELECT COUNT(*)::int count FROM users WHERE online=true')]);res.json({users:u.rows[0].count,messages:m.rows[0].count,groups:g.rows[0].count,online:o.rows[0].count})}catch(e){res.status(500).json({error:'Не удалось загрузить статистику'})}});
 app.get('/api/users',auth,async(req,res)=>{
   const q=String(req.query.q||'').trim().toLowerCase();
