@@ -254,9 +254,9 @@ app.post('/api/users/:id/call',auth,async(req,res)=>{
   res.json({ok:true});
 });
 app.get('/api/notifications',auth,async(req,res)=>{
-  const r=await pool.query('SELECT n.id,n.created_at,u.username,u.name,u.avatar FROM call_notifications n JOIN users u ON u.id=n.from_user_id WHERE n.to_user_id=$1 AND n.read=false ORDER BY n.created_at DESC LIMIT 20',[req.user.id]);
+  const r=await pool.query('SELECT n.id,n.created_at,u.id AS from_id,u.username,u.name,u.avatar FROM call_notifications n JOIN users u ON u.id=n.from_user_id WHERE n.to_user_id=$1 AND n.read=false ORDER BY n.created_at DESC LIMIT 20',[req.user.id]);
   await pool.query('UPDATE call_notifications SET read=true WHERE to_user_id=$1 AND read=false',[req.user.id]);
-  res.json(r.rows.map(x=>({id:x.id,type:'call',from:{id:x.from_user_id,username:x.username,name:x.name,avatar:x.avatar||''},createdAt:Number(x.created_at)})));
+  res.json(r.rows.map(x=>({id:x.id,type:'call',from:{id:x.from_id,username:x.username,name:x.name,avatar:x.avatar||''},createdAt:Number(x.created_at)})));
 });
 app.patch('/api/admin/users/:id/title',auth,async(req,res)=>{const admin=await requireOwnerAdmin(req,res);if(!admin)return;const title=String(req.body.title||'').trim().slice(0,50);const target=await getUser(req.params.id);if(!target)return res.status(404).json({error:'Пользователь не найден'});await pool.query('UPDATE users SET custom_title=$1 WHERE id=$2',[title,target.id]);res.json(publicUser(await getUser(target.id)))});
 app.patch('/api/admin/users/:id/check',auth,async(req,res)=>{const admin=await requireOwnerAdmin(req,res);if(!admin)return;const target=await getUser(req.params.id);if(!target)return res.status(404).json({error:'Пользователь не найден'});const enabled=req.body.enabled!==false;await pool.query('UPDATE users SET admin_check=$1 WHERE id=$2',[enabled,target.id]);res.json(publicUser(await getUser(target.id)))});
