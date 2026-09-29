@@ -80,6 +80,12 @@ async function initDb(){
      created_at BIGINT NOT NULL,edited BOOLEAN NOT NULL DEFAULT FALSE,deleted BOOLEAN NOT NULL DEFAULT FALSE
     );
     CREATE INDEX IF NOT EXISTS group_messages_idx ON group_messages(group_id,created_at);
+    CREATE TABLE IF NOT EXISTS hidden_chats(
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      peer_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      hidden_at BIGINT NOT NULL,
+      PRIMARY KEY(user_id,peer_id)
+    );
     CREATE TABLE IF NOT EXISTS conversation_reads(
      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
      peer_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -179,13 +185,25 @@ app.get('/api/chats',auth,async(req,res)=>{
  chats.sort((a,b)=>Number(b.pinned)-Number(a.pinned)||b.last.createdAt-a.last.createdAt);
  res.json(chats);
 });
+app.delete('/api/chats/:uid',auth,async(req,res)=>{
+ const peer=await getUser(req.params.uid); if(!peer)return res.status(404).json({error:'Пользователь не найден'});
+ await pool.query('INSERT INTO hidden_chats(user_id,peer_id,hidden_at) VALUES($1,$2,$3) ON CONFLICT(user_id,peer_id) DO UPDATE SET hidden_at=EXCLUDED.hidden_at',[req.user.id,req.params.uid,Date.now()]);
+ res.json({ok:true});
+});
 app.post('/api/chats/:uid/pin',auth,async(req,res)=>{
  const peer=await getUser(req.params.uid); if(!peer)return res.status(404).json({error:'Пользователь не найден'});
  const old=await pool.query('SELECT 1 FROM pinned_chats WHERE user_id=$1 AND peer_id=$2',[req.user.id,req.params.uid]);
  if(old.rowCount) await pool.query('DELETE FROM pinned_chats WHERE user_id=$1 AND peer_id=$2',[req.user.id,req.params.uid]);
  else await pool.query('INSERT INTO pinned_chats(user_id,peer_id,pinned_at) VALUES($1,$2,$3) ON CONFLICT DO NOTHING',[req.user.id,req.params.uid,Date.now()]);
  res.json({pinned:!old.rowCount});
-});app.get('/api/groups/:id',auth,async(req,res)=>{
+});app.delete('/api/groups/:id',auth,async(req,res)=>{
+ const g=await pool.query('SELECT created_by FROM groups WHERE id=$1',[req.params.id]);
+ if(!g.rowCount)return res.status(404).json({error:'Группа не найдена'});
+ if(g.rows[0].created_by!==req.user.id)return res.status(403).json({error:'Только владелец может удалить группу'});
+ await pool.query('DELETE FROM groups WHERE id=$1',[req.params.id]);
+ res.json({ok:true});
+});
+app.get('/api/groups/:id',auth,async(req,res)=>{
  const r=await pool.query(`SELECT g.id,g.name,g.avatar,g.created_by,g.created_at,
  (SELECT COUNT(*) FROM group_members WHERE group_id=g.id)::int members FROM groups g
  JOIN group_members gm ON gm.group_id=g.id WHERE g.id=$1 AND gm.user_id=$2`,[req.params.id,req.user.id]);
