@@ -148,7 +148,7 @@ app.patch('/api/me',auth,async(req,res)=>{
   res.json(publicUser(r.rows[0]));
 });
 
-app.get('/api/users',auth,async(req,res)=>{
+app.get('/api/stats',auth,async(req,res)=>{try{const [u,m,g]=await Promise.all([pool.query('SELECT COUNT(*)::int count FROM users'),pool.query('SELECT COUNT(*)::int count FROM messages'),pool.query('SELECT COUNT(*)::int count FROM groups')]);res.json({users:u.rows[0].count,messages:m.rows[0].count,groups:g.rows[0].count})}catch(e){res.status(500).json({error:'Не удалось загрузить статистику'})}});\napp.get('/api/users',auth,async(req,res)=>{
   const q=String(req.query.q||'').trim().toLowerCase();
   const r=await pool.query(`SELECT * FROM users WHERE id<>$1 AND ($2='' OR username ILIKE '%'||$2||'%' OR name ILIKE '%'||$2||'%') ORDER BY username LIMIT 50`,[req.user.id,q]);
   res.json(r.rows.map(publicUser));
