@@ -20,7 +20,26 @@ const PORT=Number(process.env.PORT||3000);
 const pool=new Pool({connectionString:process.env.DATABASE_URL,ssl:process.env.DATABASE_URL?{rejectUnauthorized:false}:false});
 
 const id=()=>crypto.randomUUID();
-const publicUser=u=>({id:u.id,username:u.username,name:u.name||u.username,avatar:u.avatar||'',online:!!u.online,lastSeen:u.last_seen||null});
+function rewardForDays(days){
+ const rewards=[
+  {key:'day1',days:1,name:'Новичок',type:'title',start:'#1688ff',end:'#1688ff'},
+  {key:'day10',days:10,name:'Освоился',type:'badge',start:'#8b5cf6',end:'#c084fc'},
+  {key:'day20',days:20,name:'Местный гангстер',type:'title',start:'#f5c542',end:'#ffd86b'},
+  {key:'day45',days:45,name:'Добрый',type:'title',start:'#35c46a',end:'#8bea9d'},
+  {key:'day60',days:60,name:'Знаток системы',type:'title',start:'#163b8f',end:'#2856c7'},
+  {key:'day70',days:70,name:'Паучиха',type:'title',start:'#ffffff',end:'#d9d9ff'},
+  {key:'day100',days:100,name:'Ветеран',type:'title',start:'#3b82f6',end:'#ffffff'},
+  {key:'day150',days:150,name:'Со стажем',type:'title',start:'#ec4899',end:'#ffffff',check:true},
+  {key:'day200',days:200,name:'Крепкий орешек',type:'title',start:'#14532d',end:'#a3e635'},
+  {key:'day356',days:356,name:'легенда не по званию',type:'title',start:'#8b5cf6',end:'#f0abfc'}
+ ];
+ return rewards;
+}
+function currentReward(days){
+ const all=rewardForDays(days);
+ return all.filter(r=>r.type==='title'&&days>=r.days).pop()||null;
+}
+const publicUser=u=>({id:u.id,username:u.username,name:u.name||u.username,avatar:u.avatar||'',online:!!u.online,lastSeen:u.last_seen||null,days:Math.max(0,Math.floor((Date.now()-Number(u.created_at||Date.now()))/86400000)),title:currentReward(Math.max(0,Math.floor((Date.now()-Number(u.created_at||Date.now()))/86400000))) });
 const makeToken=u=>jwt.sign({id:u.id},SECRET,{expiresIn:'30d'});
 
 async function initDb(){
@@ -154,6 +173,13 @@ app.patch('/api/me',auth,async(req,res)=>{
   res.json(publicUser(r.rows[0]));
 });
 
+app.get('/api/rewards',auth,async(req,res)=>{
+ const u=await getUser(req.user.id);
+ const days=Math.max(0,Math.floor((Date.now()-Number(u.created_at||Date.now()))/86400000));
+ const rewards=rewardForDays(days).map(r=>({...r,unlocked:days>=r.days}));
+ const next=rewards.find(r=>!r.unlocked)||null;
+ res.json({days,rewards,current:currentReward(days),next,progress:next?Math.min(100,Math.round(days/next.days*100)):100});
+});
 app.get('/api/stats',auth,async(req,res)=>{try{const [u,m,g,o]=await Promise.all([pool.query('SELECT COUNT(*)::int count FROM users'),pool.query('SELECT COUNT(*)::int count FROM messages'),pool.query('SELECT COUNT(*)::int count FROM groups'),pool.query('SELECT COUNT(*)::int count FROM users WHERE online=true')]);res.json({users:u.rows[0].count,messages:m.rows[0].count,groups:g.rows[0].count,online:o.rows[0].count})}catch(e){res.status(500).json({error:'Не удалось загрузить статистику'})}});
 app.get('/api/users',auth,async(req,res)=>{
   const q=String(req.query.q||'').trim().toLowerCase();
