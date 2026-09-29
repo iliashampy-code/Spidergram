@@ -7,6 +7,7 @@ const jwt=require('jsonwebtoken');
 const cors=require('cors');
 const crypto=require('crypto');
 const {Pool}=require('pg');
+const webpush=require('web-push');
 
 const app=express();
 const server=http.createServer(app);
@@ -117,6 +118,19 @@ async function initDb(){
      peer_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
      last_read_at BIGINT NOT NULL DEFAULT 0,PRIMARY KEY(user_id,peer_id)
     );
+    CREATE TABLE IF NOT EXISTS push_config(
+      id INTEGER PRIMARY KEY,
+      public_key TEXT NOT NULL,
+      private_key TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS push_subscriptions(
+      endpoint TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      p256dh TEXT NOT NULL,
+      auth TEXT NOT NULL,
+      created_at BIGINT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS push_subscriptions_user_idx ON push_subscriptions(user_id);
     CREATE TABLE IF NOT EXISTS call_notifications(
       id TEXT PRIMARY KEY,
       to_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -126,6 +140,15 @@ async function initDb(){
     );
     CREATE INDEX IF NOT EXISTS call_notifications_to_idx ON call_notifications(to_user_id,read,created_at);
   `);
+  const pushCfg=await pool.query('SELECT * FROM push_config WHERE id=1');
+  if(!pushCfg.rowCount){
+    const keys=webpush.generateVAPIDKeys();
+    await pool.query('INSERT INTO push_config(id,public_key,private_key) VALUES(1,$1,$2)',[keys.publicKey,keys.privateKey]);
+  }
+  const savedPush=await pool.query('SELECT * FROM push_config WHERE id=1');
+  const vapid=savedPush.rows[0];
+  webpush.setVapidDetails(process.env.VAPID_SUBJECT||'mailto:spidergram@localhost',vapid.public_key,vapid.private_key);
+
   const resetPassword=String(process.env.DOBRY_RESET_PASSWORD||'');
   if(resetPassword){
     if(resetPassword.length<6) throw new Error('DOBRY_RESET_PASSWORD должен содержать минимум 6 символов');
@@ -242,6 +265,38 @@ app.get('/api/rewards',auth,async(req,res)=>{
 function isOwnerAdmin(u){return String(u?.username||'').toLowerCase()==='dobry'}
 async function requireOwnerAdmin(req,res){const u=await getUser(req.user.id);if(!isOwnerAdmin(u)){res.status(403).json({error:'Доступ только для @dobry'});return null}return u}
 app.get('/api/admin/users',auth,async(req,res)=>{const admin=await requireOwnerAdmin(req,res);if(!admin)return;const q=String(req.query.q||'').trim().toLowerCase();const r=await pool.query("SELECT * FROM users WHERE ($1='' OR username ILIKE '%'||$1||'%' OR name ILIKE '%'||$1||'%') ORDER BY username LIMIT 50",[q]);res.json(r.rows.map(publicUser))});
+app.get('/api/push/public-key',auth,async(req,res)=>{
+  const r=await pool.query('SELECT public_key FROM push_config WHERE id=1');
+  res.json({publicKey:r.rows[0]?.public_key||''});
+});
+app.post('/api/push/subscribe',auth,async(req,res)=>{
+  try{
+    const s=req.body?.subscription||{};
+    const endpoint=String(s.endpoint||'');
+    const p256dh=String(s.keys?.p256dh||'');
+    const authKey=String(s.keys?.auth||'');
+    if(!endpoint||!p256dh||!authKey)return res.status(400).json({error:'Некорректная push-подписка'});
+    await pool.query('INSERT INTO push_subscriptions(endpoint,user_id,p256dh,auth,created_at) VALUES($1,$2,$3,$4,$5) ON CONFLICT(endpoint) DO UPDATE SET user_id=EXCLUDED.user_id,p256dh=EXCLUDED.p256dh,auth=EXCLUDED.auth',[endpoint,req.user.id,p256dh,authKey,Date.now()]);
+    res.json({ok:true});
+  }catch(e){res.status(500).json({error:'Не удалось сохранить push-подписку'});}
+});
+app.delete('/api/push/subscribe',auth,async(req,res)=>{
+  const endpoint=String(req.body?.endpoint||'');
+  if(endpoint)await pool.query('DELETE FROM push_subscriptions WHERE endpoint=$1 AND user_id=$2',[endpoint,req.user.id]);
+  res.json({ok:true});
+});
+async function sendPushToUser(userId,payload){
+  const r=await pool.query('SELECT endpoint,p256dh,auth FROM push_subscriptions WHERE user_id=$1',[userId]);
+  for(const s of r.rows){
+    try{
+      await webpush.sendNotification({endpoint:s.endpoint,keys:{p256dh:s.p256dh,auth:s.auth}},JSON.stringify(payload),{TTL:60});
+    }catch(e){
+      if(e?.statusCode===404||e?.statusCode===410)await pool.query('DELETE FROM push_subscriptions WHERE endpoint=$1',[s.endpoint]);
+      else console.warn('Push notification error:',e?.message||e);
+    }
+  }
+}
+
 app.post('/api/users/:id/call',auth,async(req,res)=>{
   if(req.params.id===req.user.id)return res.status(400).json({error:'Нельзя позвать самого себя'});
   const target=await getUser(req.params.id);if(!target)return res.status(404).json({error:'Пользователь не найден'});
@@ -251,6 +306,7 @@ app.post('/api/users/:id/call',auth,async(req,res)=>{
   const n={id:id(),to_user_id:target.id,from_user_id:me.id,created_at:Date.now()};
   await pool.query('INSERT INTO call_notifications(id,to_user_id,from_user_id,created_at,read) VALUES($1,$2,$3,$4,false)',[n.id,n.to_user_id,n.from_user_id,n.created_at]);
   io.to(target.id).emit('call:notify',{id:n.id,from:publicUser(me),createdAt:n.created_at});
+  sendPushToUser(target.id,{type:'call',title:'SpiderGram',body:(me.name||me.username)+' хочет с вами поговорить',from:publicUser(me)}).catch(e=>console.warn('Push send failed:',e?.message||e));
   res.json({ok:true});
 });
 app.get('/api/notifications',auth,async(req,res)=>{
