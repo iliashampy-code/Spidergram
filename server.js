@@ -167,7 +167,7 @@ async function lastMessagesFor(uid){
     FROM (
       SELECT CASE WHEN "from"=$1 THEN "to" ELSE "from" END AS other_id,
              id,"from","to",text,type,media_url,created_at
-      FROM messages WHERE "from"=$1 OR "to"=$1
+      FROM messages WHERE ("from"=$1 OR "to"=$1) AND NOT EXISTS (SELECT 1 FROM hidden_chats h WHERE h.user_id=$1 AND h.peer_id=CASE WHEN "from"=$1 THEN "to" ELSE "from" END)
     ) x
     ORDER BY other_id,created_at DESC
   `,[uid]);
