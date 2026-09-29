@@ -165,7 +165,7 @@ app.post('/api/login',async(req,res)=>{
 app.get('/api/me',auth,async(req,res)=>{
   const u=await getUser(req.user.id);
   if(!u)return res.status(404).json({error:'Пользователь не найден'});
-  res.json(await publicUserAsync(u));
+  res.json(publicUser(u));
 });
 
 app.patch('/api/me',auth,async(req,res)=>{
@@ -175,7 +175,7 @@ app.patch('/api/me',auth,async(req,res)=>{
   const avatar=typeof req.body.avatar==='string'?req.body.avatar:u.avatar;
   if(avatar.length>2800000)return res.status(413).json({error:'Аватар слишком большой'});
   const r=await pool.query('UPDATE users SET name=$1,avatar=$2 WHERE id=$3 RETURNING *',[name,avatar,u.id]);
-  res.json(await publicUserAsync(r.rows[0]));
+  res.json(publicUser(r.rows[0]));
 });
 
 app.get('/api/admin/awards',auth,async(req,res)=>{
@@ -208,7 +208,7 @@ app.get('/api/stats',auth,async(req,res)=>{try{const [u,m,g,o]=await Promise.all
 app.get('/api/users',auth,async(req,res)=>{
   const q=String(req.query.q||'').trim().toLowerCase();
   const r=await pool.query(`SELECT * FROM users WHERE id<>$1 AND ($2='' OR username ILIKE '%'||$2||'%' OR name ILIKE '%'||$2||'%') ORDER BY username LIMIT 50`,[req.user.id,q]);
-  const out=[];for(const u of r.rows)out.push(await publicUserAsync(u));res.json(out);
+  const out=[];for(const u of r.rows)out.push(publicUser(u));res.json(out);
 });
 
 async function lastMessagesFor(uid){
@@ -224,7 +224,7 @@ async function lastMessagesFor(uid){
   const out=[];
   for(const m of r.rows){
     const u=await getUser(m.other_id);
-    if(u)out.push({user:await publicUserAsync(u),last:{id:m.id,from:m.from,to:m.to,text:m.text,type:m.type,mediaUrl:m.media_url,createdAt:Number(m.created_at)}});
+    if(u)out.push({user:publicUser(u),last:{id:m.id,from:m.from,to:m.to,text:m.text,type:m.type,mediaUrl:m.media_url,createdAt:Number(m.created_at)}});
   }
   return out.sort((a,b)=>b.last.createdAt-a.last.createdAt);
 }
