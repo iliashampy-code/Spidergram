@@ -363,7 +363,7 @@ app.get('/api/rewards',auth,async(req,res)=>{
  const st=taskStateFor(u);
  const taskTitles=taskTitleRewards.map(r=>({...r,type:'task',unlocked:st.titles.includes(r.key)}));
  const next=rewards.find(r=>!r.unlocked)||null;
- res.json({days,rewards,current:currentReward(days),next,progress:next?Math.min(100,Math.round(days/next.days*100)):100,taskTitles});
+ const shopTitles=shopItems.filter(x=>x.type==='title').map(x=>({key:x.id,name:x.name,type:'shop',start:x.start,end:x.end,animated:!!x.animated,unlocked:parseJson(u.shop_owned,[]).includes(x.id)})); res.json({days,rewards,current:currentReward(days),next,progress:next?Math.min(100,Math.round(days/next.days*100)):100,taskTitles,shopTitles});
 });
 function isOwnerAdmin(u){return String(u?.username||'').toLowerCase()==='dobry'}
 async function requireOwnerAdmin(req,res){const u=await getUser(req.user.id);if(!isOwnerAdmin(u)){res.status(403).json({error:'Доступ только для @dobry'});return null}return u}
