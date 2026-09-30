@@ -217,6 +217,7 @@ async function applyActivity(uid,event,localDate,localHour){
  reward('voices3',st.voices>=3,40);
  reward('people5',st.people.length>=5,50);
  if(currencyEarned)await pool.query('UPDATE users SET currency=currency+$1 WHERE id=$2',[currencyEarned,uid]);
+ if(newTitles.length){let awards=parseJson(u.title_awards,[]);for(const t of newTitles){if(t&&!awards.includes(t.name))awards.push(t.name)}await pool.query('UPDATE users SET title_awards=$1 WHERE id=$2',[JSON.stringify(awards),uid]);}
  if(changed)await pool.query('UPDATE users SET task_state=$1 WHERE id=$2',[JSON.stringify(st),uid]);
  return {newTitles:newTitles.filter(Boolean),currencyEarned};
 }
