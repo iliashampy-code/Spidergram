@@ -514,7 +514,7 @@ app.post('/api/groups',auth,async(req,res)=>{
  await pool.query('BEGIN'); try{
   await pool.query('INSERT INTO groups(id,name,created_by,created_at) VALUES($1,$2,$3,$4)',[gid,name,req.user.id,now]);
   await pool.query('INSERT INTO group_members(group_id,user_id,role,joined_at) VALUES($1,$2,\'owner\',$3)',[gid,req.user.id,now]);
-  await pool.query('COMMIT'); res.json({id:gid,name,createdBy:req.user.id,createdAt:now,role:'owner',members:1});
+  await pool.query('COMMIT'); const local=new Date(); const activityResult=await applyActivity(req.user.id,'group',local.getFullYear()+"-"+String(local.getMonth()+1).padStart(2,"0")+"-"+String(local.getDate()).padStart(2,"0"),local.getHours()); res.json({id:gid,name,createdBy:req.user.id,createdAt:now,role:'owner',members:1,...activityResult});
  }catch(e){await pool.query('ROLLBACK');res.status(500).json({error:'Не удалось создать группу'});}
 });
 app.post('/api/groups/:id/members',auth,async(req,res)=>{
