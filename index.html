@@ -71,28 +71,12 @@ async function openGroup(g){currentGroup=g;peer=null;app.innerHTML=`<div class=c
 async function sendGroup(){const t=document.getElementById("msg").value.trim();if(!t||!currentGroup)return;try{const m=await api("/api/groups/"+currentGroup.id+"/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({text:t,type:"text"})});document.getElementById("msg").value="";addMessage(m)}catch(e){alert(e.message)}}
 function renderUsers(a){document.getElementById("list").innerHTML=a.length?a.map(x=>`<div class=chat onclick='openChat(${JSON.stringify(x)})'><div class=avatar>${avatar(x)}</div><div class=chattext><div class=chatname>${esc(x.name)}</div><div class=preview>@${esc(x.username)} ${x.online?"• онлайн":""}</div></div></div>`).join(""):`<div class=empty>Пользователь не найден</div>`}
 async function applyMessageShopBackground(){
- const box=document.getElementById("messages");
- if(!box)return;
- box.style.backgroundColor="";
- box.style.backgroundImage="";
- box.style.backgroundSize="";
- box.style.animation="";
- const bg=(settings.shopEquipped||{}).background;
- const ab=(settings.shopEquipped||{}).animated_background;
- if(bg==="bg_grid"){
-  box.style.backgroundColor="var(--bg)";
-  box.style.backgroundImage="linear-gradient(#ffffff12 1px,transparent 1px),linear-gradient(90deg,#ffffff12 1px,transparent 1px)";
-  box.style.backgroundSize="22px 22px";
- }else if(bg==="bg_stars"){
-  box.style.backgroundColor="var(--bg)";
-  box.style.backgroundImage="radial-gradient(#ffffff66 1px,transparent 1px)";
-  box.style.backgroundSize="24px 24px";
- }else if(ab==="bg_aurora"){
-  box.style.backgroundColor="#10131b";
-  box.style.backgroundImage="linear-gradient(120deg,#0ea5e966,#8b5cf666,#ec489966)";
-  box.style.backgroundSize="300% 300%";
-  box.style.animation="shopAurora 10s ease infinite";
- }
+ const box=document.getElementById("messages");if(!box)return;
+ box.style.removeProperty("background-color");box.style.removeProperty("background-image");box.style.removeProperty("background-size");box.style.removeProperty("animation");
+ const eq=settings.shopEquipped||{};const bg=eq.background;const ab=eq.animated_background;
+ if(bg==="bg_grid"){box.style.setProperty("background-color","var(--bg)","important");box.style.setProperty("background-image","linear-gradient(#ffffff18 1px,transparent 1px),linear-gradient(90deg,#ffffff18 1px,transparent 1px)","important");box.style.setProperty("background-size","22px 22px","important")}
+ else if(bg==="bg_stars"){box.style.setProperty("background-color","var(--bg)","important");box.style.setProperty("background-image","radial-gradient(#ffffff66 1px,transparent 1px)","important");box.style.setProperty("background-size","24px 24px","important")}
+ else if(ab==="bg_aurora"){box.style.setProperty("background-color","#10131b","important");box.style.setProperty("background-image","linear-gradient(120deg,#0ea5e966,#8b5cf666,#ec489966)","important");box.style.setProperty("background-size","300% 300%","important");box.style.setProperty("animation","shopAurora 10s ease infinite","important")}
 }
 async function openChat(x){peer=x;app.innerHTML=`<div class=chathead><button class=back onclick=home()>‹</button><button class="avatar" style="border:0" onclick='showUserProfile("${x.username}")'>${avatar(x)}</button><div><b>${esc(x.name)}${verifiedCheckHtml(x)}</b><div id=status class=status></div></div></div><div id=messages class=messages></div><div class=composer><button class=round onclick=document.getElementById("photo").click()>＋</button><input id=photo class=hidden type=file accept="image/*" multiple onchange=sendPhotos(event)><input id=msg placeholder="Сообщение..." oninput=notifyTyping() onkeydown='if(event.key==="Enter")send()'><button class="round" id="mic" onclick="toggleRecord()" aria-label="Записать голосовое"><span class="mic-icon">🎙️</span></button><button class="send" type="button" onclick="send()" aria-label="Отправить сообщение"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 3 10.5 13.5"></path><path d="m21 3-6.7 18-3.8-7.5L3 9.7 21 3Z"></path></svg></button></div>`;updateStatus();let ms=await api("/api/messages/"+x.id);const box=document.getElementById("messages");applyMessageShopBackground();box.innerHTML="";box.dataset.lastDateKey="";ms.sort((a,b)=>Number(a.createdAt)-Number(b.createdAt)).forEach(addMessage);markRead()}
 function updateStatus(){if(!peer)return;document.getElementById("status").textContent=peer.online?"онлайн":peer.lastSeen?"был(а) недавно":"не в сети";document.getElementById("status").classList.remove("typing")}
