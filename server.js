@@ -52,7 +52,6 @@ const shopItems=[
  {id:'bg_grid',type:'background',name:'Техно-сетка',price:80,value:'grid',description:'Особый фон сообщений'},
  {id:'bg_stars',type:'background',name:'Звёзды',price:100,value:'stars',description:'Особый фон сообщений'},
  {id:'bg_aurora',type:'animated_background',name:'Живая Aurora',price:250,value:'aurora',description:'Анимированный фон сообщений'},
- {id:'bg_matrix',type:'animated_background',name:'Matrix',price:300,value:'matrix',description:'Анимированный фон сообщений'},
  {id:'msg_glass',type:'message_style',name:'Glass',price:150,value:'glass',description:'Новый стиль сообщений'},
  {id:'msg_minimal',type:'message_style',name:'Minimal',price:100,value:'minimal',description:'Новый стиль сообщений'},
  {id:'frame_neon',type:'avatar_frame',name:'Неоновая рамка',price:180,value:'neon',description:'Рамка вокруг аватара'},
