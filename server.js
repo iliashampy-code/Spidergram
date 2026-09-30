@@ -36,6 +36,33 @@ function rewardForDays(days){
  ];
  return rewards;
 }
+const taskTitleRewards=[
+ {key:'night_spider',name:'night spider',start:'#102a72',end:'#ffffff',animated:true,description:'Использовать SpiderGram ночью'},
+ {key:'big_boss',name:'Big boss',start:'#111111',end:'#ef4444',animated:true,description:'Создать 5 групп'},
+ {key:'friendly',name:'дружелюбный',start:'#a3e635',end:'#a3e635',animated:false,description:'Отправить сообщение 10 разным людям'},
+ {key:'nightnik',name:'ночник',start:'#111111',end:'#fff1a8',animated:true,description:'Использовать мессенджер после 00:00 5 раз'},
+ {key:'batman',name:'batman',start:'#111111',end:'#facc15',animated:true,description:'Отправить сообщение в 3:00–4:00 ночи'}
+];
+const shopItems=[
+ {id:'color_cyan',type:'color',name:'Неоновый голубой',price:60,value:'#00d9ff',description:'Цвет интерфейса'},
+ {id:'color_purple',type:'color',name:'Неоновый фиолетовый',price:70,value:'#a855f7',description:'Цвет интерфейса'},
+ {id:'color_lime',type:'color',name:'Салатовый',price:70,value:'#a3e635',description:'Цвет интерфейса'},
+ {id:'gradient_aurora',type:'gradient',name:'Aurora',price:120,value:'linear-gradient(135deg,#0ea5e9,#8b5cf6,#ec4899)',description:'Градиент интерфейса'},
+ {id:'gradient_sunset',type:'gradient',name:'Sunset',price:140,value:'linear-gradient(135deg,#f97316,#ec4899,#8b5cf6)',description:'Градиент интерфейса'},
+ {id:'bg_grid',type:'background',name:'Техно-сетка',price:80,value:'grid',description:'Особый фон сообщений'},
+ {id:'bg_stars',type:'background',name:'Звёзды',price:100,value:'stars',description:'Особый фон сообщений'},
+ {id:'bg_aurora',type:'animated_background',name:'Живая Aurora',price:250,value:'aurora',description:'Анимированный фон сообщений'},
+ {id:'bg_matrix',type:'animated_background',name:'Matrix',price:300,value:'matrix',description:'Анимированный фон сообщений'},
+ {id:'msg_glass',type:'message_style',name:'Glass',price:150,value:'glass',description:'Новый стиль сообщений'},
+ {id:'msg_minimal',type:'message_style',name:'Minimal',price:100,value:'minimal',description:'Новый стиль сообщений'},
+ {id:'frame_neon',type:'avatar_frame',name:'Неоновая рамка',price:180,value:'neon',description:'Рамка вокруг аватара'},
+ {id:'frame_gold',type:'avatar_frame',name:'Золотая рамка',price:220,value:'gold',description:'Рамка вокруг аватара'},
+ {id:'effect_glow',type:'profile_effect',name:'Glow',price:250,value:'glow',description:'Эффект профиля'},
+ {id:'effect_pulse',type:'profile_effect',name:'Pulse',price:300,value:'pulse',description:'Анимированный эффект профиля'},
+ {id:'title_weakling',type:'title',name:'Доходяга',price:250,value:'Доходяга',start:'#111111',end:'#38bdf8',animated:false,description:'Чёрно-голубой титул'},
+ {id:'title_error404',type:'title',name:'Error 404',price:350,value:'Error 404',start:'#38bdf8',end:'#ffffff',animated:true,description:'Голубой-белый анимированный титул'}
+];
+function parseJson(value,fallback){try{return JSON.parse(value||'')}catch{return fallback}}
 function currentReward(days){
  const all=rewardForDays(days);
  return all.filter(r=>r.type==='title'&&days>=r.days).pop()||null;
@@ -75,6 +102,10 @@ async function initDb(){
     ALTER TABLE users ADD COLUMN IF NOT EXISTS admin_check BOOLEAN NOT NULL DEFAULT FALSE;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS selected_title TEXT NOT NULL DEFAULT '';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS title_awards TEXT NOT NULL DEFAULT '[]';
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS currency INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS task_state TEXT NOT NULL DEFAULT '{}';
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS shop_owned TEXT NOT NULL DEFAULT '[]';
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS shop_equipped TEXT NOT NULL DEFAULT '{}';
     CREATE TABLE IF NOT EXISTS groups(id TEXT PRIMARY KEY,name TEXT NOT NULL,avatar TEXT NOT NULL DEFAULT '',created_by TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,created_at BIGINT NOT NULL);
     CREATE TABLE IF NOT EXISTS group_members(group_id TEXT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,role TEXT NOT NULL DEFAULT 'member',joined_at BIGINT NOT NULL,PRIMARY KEY(group_id,user_id));
     CREATE TABLE IF NOT EXISTS group_messages(id TEXT PRIMARY KEY,group_id TEXT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,"from" TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,text TEXT NOT NULL DEFAULT '',type TEXT NOT NULL DEFAULT 'text',media_url TEXT NOT NULL DEFAULT '',created_at BIGINT NOT NULL,edited BOOLEAN NOT NULL DEFAULT FALSE,deleted BOOLEAN NOT NULL DEFAULT FALSE);
@@ -160,6 +191,35 @@ async function initDb(){
   }
 }
 
+function taskStateFor(u){const x=parseJson(u.task_state,{});return {nightDates:Array.isArray(x.nightDates)?x.nightDates:[],midnightDates:Array.isArray(x.midnightDates)?x.midnightDates:[],groups:Number(x.groups||0),messages:Number(x.messages||0),photos:Number(x.photos||0),voices:Number(x.voices||0),people:Array.isArray(x.people)?x.people:[],claimed:x.claimed&&typeof x.claimed==='object'?x.claimed:{},titles:Array.isArray(x.titles)?x.titles:[]};}
+async function applyActivity(uid,event,localDate,localHour){
+ const u=await getUser(uid); if(!u)return {newTitles:[],currencyEarned:0};
+ const st=taskStateFor(u); const hour=Math.max(0,Math.min(23,Number(localHour)||0)); const date=String(localDate||new Date().toISOString().slice(0,10)); let changed=false;
+ if(event==='visit'){
+   if((hour>=22||hour<5)&&!st.nightDates.includes(date)){st.nightDates.push(date);st.nightDates=st.nightDates.slice(-60);changed=true}
+   if(hour<5&&!st.midnightDates.includes(date)){st.midnightDates.push(date);st.midnightDates=st.midnightDates.slice(-60);changed=true}
+ }else if(event==='group'){st.groups++;changed=true}
+ else if(event==='photo'){st.photos++;changed=true}
+ else if(event==='voice'){st.voices++;changed=true}
+ else if(event==='message'){st.messages++;changed=true}
+
+ const newTitles=[]; const addTitle=(key)=>{if(!st.titles.includes(key)){st.titles.push(key);newTitles.push(taskTitleRewards.find(x=>x.key===key));changed=true}};
+ if(st.nightDates.length>=1)addTitle('night_spider');
+ if(st.groups>=5)addTitle('big_boss');
+ if(st.people.length>=10)addTitle('friendly');
+ if(st.midnightDates.length>=5)addTitle('nightnik');
+ if(event==='message'&&hour>=3&&hour<4)addTitle('batman');
+
+ let currencyEarned=0; const reward=(key,condition,amount)=>{if(condition&&!st.claimed[key]){st.claimed[key]=true;currencyEarned+=amount;changed=true}};
+ reward('messages25',st.messages>=25,30);
+ reward('group1',st.groups>=1,25);
+ reward('photos3',st.photos>=3,40);
+ reward('voices3',st.voices>=3,40);
+ reward('people5',st.people.length>=5,50);
+ if(currencyEarned)await pool.query('UPDATE users SET currency=currency+$1 WHERE id=$2',[currencyEarned,uid]);
+ if(changed)await pool.query('UPDATE users SET task_state=$1 WHERE id=$2',[JSON.stringify(st),uid]);
+ return {newTitles:newTitles.filter(Boolean),currencyEarned};
+}
 async function getUser(uid){
   const r=await pool.query('SELECT * FROM users WHERE id=$1',[uid]);
   return r.rows[0]||null;
@@ -204,6 +264,46 @@ app.post('/api/login',async(req,res)=>{
   }catch{res.status(500).json({error:'Ошибка базы данных'});}
 });
 
+app.post('/api/activity',auth,async(req,res)=>{
+ try{
+  const event=String(req.body.event||'visit');
+  const localDate=String(req.body.localDate||'').slice(0,10);
+  const localHour=Number(req.body.localHour);
+  if(!['visit','message','group','photo','voice'].includes(event))return res.status(400).json({error:'Неизвестное действие'});
+  if(event==='message'&&req.body.peerId){
+    const u=await getUser(req.user.id); const st=taskStateFor(u); const peerId=String(req.body.peerId);
+    if(peerId&&peerId!==req.user.id&&!st.people.includes(peerId)){st.people.push(peerId);st.people=st.people.slice(-200);await pool.query('UPDATE users SET task_state=$1 WHERE id=$2',[JSON.stringify(st),req.user.id]);}
+  }
+  const result=await applyActivity(req.user.id,event,localDate,localHour);
+  res.json(result);
+ }catch(e){res.status(500).json({error:'Не удалось обновить задания'})}
+});
+app.get('/api/shop',auth,async(req,res)=>{
+ const u=await getUser(req.user.id); if(!u)return res.status(404).json({error:'Пользователь не найден'});
+ const owned=parseJson(u.shop_owned,[]),equipped=parseJson(u.shop_equipped,{});
+ res.json({currency:Number(u.currency||0),items:shopItems.map(x=>({...x,owned:owned.includes(x.id),equipped:equipped[x.type]===x.id})),equipped});
+});
+app.post('/api/shop/buy',auth,async(req,res)=>{
+ const idv=String(req.body.id||''); const item=shopItems.find(x=>x.id===idv); if(!item)return res.status(404).json({error:'Товар не найден'});
+ const u=await getUser(req.user.id); let owned=parseJson(u.shop_owned,[]);
+ if(owned.includes(item.id))return res.json({ok:true,already:true,currency:Number(u.currency||0)});
+ if(Number(u.currency||0)<item.price)return res.status(400).json({error:'Недостаточно валюты'});
+ owned.push(item.id);
+ if(item.type==='title'){
+   let awards=parseJson(u.title_awards,[]);
+   if(!awards.includes(item.value))awards.push(item.value);
+   await pool.query('UPDATE users SET currency=currency-$1,shop_owned=$2,title_awards=$3 WHERE id=$4',[item.price,JSON.stringify(owned),JSON.stringify(awards),u.id]);
+ }else{
+   await pool.query('UPDATE users SET currency=currency-$1,shop_owned=$2 WHERE id=$3',[item.price,JSON.stringify(owned),u.id]);
+ }
+ res.json({ok:true,currency:Number(u.currency||0)-item.price,item});
+});
+app.post('/api/shop/equip',auth,async(req,res)=>{
+ const item=shopItems.find(x=>x.id===String(req.body.id||'')); if(!item)return res.status(404).json({error:'Товар не найден'});
+ const u=await getUser(req.user.id); const owned=parseJson(u.shop_owned,[]); if(!owned.includes(item.id))return res.status(403).json({error:'Сначала купите товар'});
+ const equipped=parseJson(u.shop_equipped,{}); equipped[item.type]=item.id;
+ await pool.query('UPDATE users SET shop_equipped=$1 WHERE id=$2',[JSON.stringify(equipped),u.id]); res.json({ok:true,equipped});
+});
 app.get('/api/me',auth,async(req,res)=>{
   const u=await getUser(req.user.id);
   if(!u)return res.status(404).json({error:'Пользователь не найден'});
@@ -260,8 +360,10 @@ app.get('/api/rewards',auth,async(req,res)=>{
  const u=await getUser(req.user.id);
  const days=Math.max(0,Math.floor((Date.now()-Number(u.created_at||Date.now()))/86400000));
  const rewards=rewardForDays(days).map(r=>({...r,unlocked:days>=r.days}));
+ const st=taskStateFor(u);
+ const taskTitles=taskTitleRewards.map(r=>({...r,type:'task',unlocked:st.titles.includes(r.key)}));
  const next=rewards.find(r=>!r.unlocked)||null;
- res.json({days,rewards,current:currentReward(days),next,progress:next?Math.min(100,Math.round(days/next.days*100)):100});
+ res.json({days,rewards,current:currentReward(days),next,progress:next?Math.min(100,Math.round(days/next.days*100)):100,taskTitles});
 });
 function isOwnerAdmin(u){return String(u?.username||'').toLowerCase()==='dobry'}
 async function requireOwnerAdmin(req,res){const u=await getUser(req.user.id);if(!isOwnerAdmin(u)){res.status(403).json({error:'Доступ только для @dobry'});return null}return u}
