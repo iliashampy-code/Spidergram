@@ -53,7 +53,6 @@ const shopItems=[
  {id:'bg_stars',type:'background',name:'Звёзды',price:100,value:'stars',description:'Особый фон сообщений'},
  {id:'bg_aurora',type:'animated_background',name:'Живая Aurora',price:250,value:'aurora',description:'Анимированный фон сообщений'},
  {id:'msg_glass',type:'message_style',name:'Glass',price:150,value:'glass',description:'Новый стиль сообщений'},
- {id:'msg_minimal',type:'message_style',name:'Minimal',price:100,value:'minimal',description:'Новый стиль сообщений'},
  {id:'frame_neon',type:'avatar_frame',name:'Неоновая рамка',price:180,value:'neon',description:'Рамка вокруг аватара'},
  {id:'frame_gold',type:'avatar_frame',name:'Золотая рамка',price:220,value:'gold',description:'Рамка вокруг аватара'},
  {id:'effect_glow',type:'profile_effect',name:'Glow',price:250,value:'glow',description:'Эффект профиля'},
@@ -70,6 +69,7 @@ const publicUser=u=>({id:u.id,username:u.username,name:u.name||u.username,avatar
 const makeToken=u=>jwt.sign({id:u.id},SECRET,{expiresIn:'30d'});
 
 async function initDb(){
+  await pool.query(`UPDATE users SET shop_owned = COALESCE((SELECT json_agg(x) FROM json_array_elements_text(COALESCE(NULLIF(users.shop_owned,''),'[]')::json) x WHERE x <> 'msg_minimal'),'[]'), shop_equipped = CASE WHEN shop_equipped::json->>'message_style' = 'msg_minimal' THEN (shop_equipped::jsonb - 'message_style')::text ELSE shop_equipped END WHERE shop_owned LIKE '%msg_minimal%' OR shop_equipped LIKE '%msg_minimal%').catch(()=>{});
   if(!process.env.DATABASE_URL) throw new Error('DATABASE_URL не задан. Добавь PostgreSQL в Railway и подключи его к сервису.');
   await pool.query(`
     CREATE TABLE IF NOT EXISTS users(
