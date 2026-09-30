@@ -40,7 +40,7 @@ function currentReward(days){
  const all=rewardForDays(days);
  return all.filter(r=>r.type==='title'&&days>=r.days).pop()||null;
 }
-const publicUser=u=>({id:u.id,username:u.username,name:u.name||u.username,avatar:u.avatar||'',online:!!u.online,lastSeen:u.last_seen||null,customTitle:u.custom_title||'',adminCheck:!!u.admin_check,selectedTitle:u.selected_title||'',days:Math.max(0,Math.floor((Date.now()-Number(u.created_at||Date.now()))/86400000)),title:currentReward(Math.max(0,Math.floor((Date.now()-Number(u.created_at||Date.now()))/86400000))) });
+const publicUser=u=>({id:u.id,username:u.username,name:u.name||u.username,avatar:u.avatar||'',online:!!u.online,lastSeen:u.last_seen||null,customTitle:u.custom_title||'',adminCheck:!!u.admin_check,selectedTitle:u.selected_title||'',titleAwards:(()=>{try{return JSON.parse(u.title_awards||'[]')}catch{return[]}})(),days:Math.max(0,Math.floor((Date.now()-Number(u.created_at||Date.now()))/86400000)),title:currentReward(Math.max(0,Math.floor((Date.now()-Number(u.created_at||Date.now()))/86400000))) });
 const makeToken=u=>jwt.sign({id:u.id},SECRET,{expiresIn:'30d'});
 
 async function initDb(){
@@ -74,6 +74,7 @@ async function initDb(){
     ALTER TABLE users ADD COLUMN IF NOT EXISTS custom_title TEXT NOT NULL DEFAULT '';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS admin_check BOOLEAN NOT NULL DEFAULT FALSE;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS selected_title TEXT NOT NULL DEFAULT '';
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS title_awards TEXT NOT NULL DEFAULT '[]';
     CREATE TABLE IF NOT EXISTS groups(id TEXT PRIMARY KEY,name TEXT NOT NULL,avatar TEXT NOT NULL DEFAULT '',created_by TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,created_at BIGINT NOT NULL);
     CREATE TABLE IF NOT EXISTS group_members(group_id TEXT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,role TEXT NOT NULL DEFAULT 'member',joined_at BIGINT NOT NULL,PRIMARY KEY(group_id,user_id));
     CREATE TABLE IF NOT EXISTS group_messages(id TEXT PRIMARY KEY,group_id TEXT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,"from" TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,text TEXT NOT NULL DEFAULT '',type TEXT NOT NULL DEFAULT 'text',media_url TEXT NOT NULL DEFAULT '',created_at BIGINT NOT NULL,edited BOOLEAN NOT NULL DEFAULT FALSE,deleted BOOLEAN NOT NULL DEFAULT FALSE);
@@ -234,8 +235,8 @@ app.patch('/api/me/title',auth,async(req,res)=>{
   const title=String(req.body.title||'').trim().slice(0,60);
   if(title){
     const days=Math.max(0,Math.floor((Date.now()-Number(u.created_at||Date.now()))/86400000));
-    const allowed=rewardForDays(days).find(x=>x.type==='title'&&x.name===title);
-    if(!allowed)return res.status(400).json({error:'Этот титул ещё не открыт'});
+    const allowed=rewardForDays(days).find(x=>x.type==='title'&&x.name===title);let awards=[];try{awards=JSON.parse(u.title_awards||'[]')}catch{}
+    if(!allowed&&!awards.includes(title))return res.status(400).json({error:'Этот титул ещё не открыт'});
   }
   const r=await pool.query('UPDATE users SET selected_title=$1 WHERE id=$2 RETURNING *',[title,u.id]);
   res.json(publicUser(r.rows[0]));
@@ -314,7 +315,7 @@ app.get('/api/notifications',auth,async(req,res)=>{
   await pool.query('UPDATE call_notifications SET read=true WHERE to_user_id=$1 AND read=false',[req.user.id]);
   res.json(r.rows.map(x=>({id:x.id,type:'call',from:{id:x.from_id,username:x.username,name:x.name,avatar:x.avatar||''},createdAt:Number(x.created_at)})));
 });
-app.patch('/api/admin/users/:id/title',auth,async(req,res)=>{const admin=await requireOwnerAdmin(req,res);if(!admin)return;const target=await getUser(req.params.id);if(!target)return res.status(404).json({error:'Пользователь не найден'});const title=String(req.body.title||'').trim().slice(0,50);const selectedTitle=String(req.body.selectedTitle||'').trim().slice(0,60);if(selectedTitle){const reward=rewardForDays(356).find(x=>x.type==='title'&&x.name===selectedTitle);if(!reward)return res.status(400).json({error:'Такого титула за достижение нет'});await pool.query('UPDATE users SET selected_title=$1,custom_title=$2 WHERE id=$3',[selectedTitle,'',target.id]);}else{await pool.query('UPDATE users SET selected_title=$1,custom_title=$2 WHERE id=$3',['',title,target.id]);}res.json(publicUser(await getUser(target.id)))});
+app.patch('/api/admin/users/:id/title',auth,async(req,res)=>{const admin=await requireOwnerAdmin(req,res);if(!admin)return;const target=await getUser(req.params.id);if(!target)return res.status(404).json({error:'Пользователь не найден'});const title=String(req.body.title||'').trim().slice(0,50);const selectedTitle=String(req.body.selectedTitle||'').trim().slice(0,60);if(selectedTitle){const reward=rewardForDays(356).find(x=>x.type==='title'&&x.name===selectedTitle);if(!reward)return res.status(400).json({error:'Такого титула за достижение нет'});let awards=[];try{awards=JSON.parse(target.title_awards||'[]')}catch{}awards=Array.from(new Set([...awards,selectedTitle]));await pool.query('UPDATE users SET selected_title=$1,custom_title=$2,title_awards=$3 WHERE id=$4',[selectedTitle,'',JSON.stringify(awards),target.id]);}else{await pool.query('UPDATE users SET selected_title=$1,custom_title=$2 WHERE id=$3',['',title,target.id]);}res.json(publicUser(await getUser(target.id)))});
 app.patch('/api/admin/users/:id/check',auth,async(req,res)=>{const admin=await requireOwnerAdmin(req,res);if(!admin)return;const target=await getUser(req.params.id);if(!target)return res.status(404).json({error:'Пользователь не найден'});const enabled=req.body.enabled!==false;await pool.query('UPDATE users SET admin_check=$1 WHERE id=$2',[enabled,target.id]);res.json(publicUser(await getUser(target.id)))});
 app.get('/api/stats',auth,async(req,res)=>{try{const [u,m,g,o]=await Promise.all([pool.query('SELECT COUNT(*)::int count FROM users'),pool.query('SELECT COUNT(*)::int count FROM messages'),pool.query('SELECT COUNT(*)::int count FROM groups'),pool.query('SELECT COUNT(*)::int count FROM users WHERE online=true')]);res.json({users:u.rows[0].count,messages:m.rows[0].count,groups:g.rows[0].count,online:o.rows[0].count})}catch(e){res.status(500).json({error:'Не удалось загрузить статистику'})}});
 app.get('/api/users',auth,async(req,res)=>{
