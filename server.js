@@ -67,7 +67,7 @@ function currentReward(days){
  const all=rewardForDays(days);
  return all.filter(r=>r.type==='title'&&days>=r.days).pop()||null;
 }
-const publicUser=u=>({id:u.id,username:u.username,name:u.name||u.username,avatar:u.avatar||'',online:!!u.online,lastSeen:u.last_seen||null,customTitle:u.custom_title||'',adminCheck:!!u.admin_check,selectedTitle:u.selected_title||'',titleAwards:(()=>{try{return JSON.parse(u.title_awards||'[]')}catch{return[]}})(),days:Math.max(0,Math.floor((Date.now()-Number(u.created_at||Date.now()))/86400000)),title:currentReward(Math.max(0,Math.floor((Date.now()-Number(u.created_at||Date.now()))/86400000))) });
+const publicUser=u=>({id:u.id,username:u.username,name:u.name||u.username,avatar:u.avatar||'',online:!!u.online,lastSeen:u.last_seen||null,customTitle:u.custom_title||'',adminCheck:!!u.admin_check,selectedTitle:u.selected_title||'',titleAwards:(()=>{try{return JSON.parse(u.title_awards||'[]')}catch{return[]}})(),customColorEnabled:!!u.custom_color_enabled,days:Math.max(0,Math.floor((Date.now()-Number(u.created_at||Date.now()))/86400000)),title:currentReward(Math.max(0,Math.floor((Date.now()-Number(u.created_at||Date.now()))/86400000))) });
 const makeToken=u=>jwt.sign({id:u.id},SECRET,{expiresIn:'30d'});
 
 async function initDb(){
@@ -104,6 +104,7 @@ async function initDb(){
     ALTER TABLE users ADD COLUMN IF NOT EXISTS title_awards TEXT NOT NULL DEFAULT '[]';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS currency INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS task_state TEXT NOT NULL DEFAULT '{}';
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS custom_color_enabled BOOLEAN NOT NULL DEFAULT FALSE;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS shop_owned TEXT NOT NULL DEFAULT '[]';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS shop_equipped TEXT NOT NULL DEFAULT '{}';
     CREATE TABLE IF NOT EXISTS groups(id TEXT PRIMARY KEY,name TEXT NOT NULL,avatar TEXT NOT NULL DEFAULT '',created_by TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,created_at BIGINT NOT NULL);
@@ -202,13 +203,14 @@ async function applyActivity(uid,event,localDate,localHour){
  else if(event==='photo'){st.photos++;changed=true}
  else if(event==='voice'){st.voices++;changed=true}
  else if(event==='message'){st.messages++;changed=true}
+ else if(event==='message_time'){changed=true}
 
  const newTitles=[]; const addTitle=(key)=>{if(!st.titles.includes(key)){st.titles.push(key);newTitles.push(taskTitleRewards.find(x=>x.key===key));changed=true}};
  if(st.nightDates.length>=1)addTitle('night_spider');
  if(st.groups>=5)addTitle('big_boss');
  if(st.people.length>=10)addTitle('friendly');
  if(st.midnightDates.length>=5)addTitle('nightnik');
- if(event==='message'&&hour>=3&&hour<4)addTitle('batman');
+ if((event==='message'||event==='message_time')&&hour>=3&&hour<4)addTitle('batman');
 
  let currencyEarned=0; const reward=(key,condition,amount)=>{if(condition&&!st.claimed[key]){st.claimed[key]=true;currencyEarned+=amount;changed=true}};
  reward('messages25',st.messages>=25,30);
@@ -270,7 +272,7 @@ app.post('/api/activity',auth,async(req,res)=>{
   const event=String(req.body.event||'visit');
   const localDate=String(req.body.localDate||'').slice(0,10);
   const localHour=Number(req.body.localHour);
-  if(!['visit','message','group','photo','voice'].includes(event))return res.status(400).json({error:'Неизвестное действие'});
+  if(!['visit','message','group','photo','voice','message_time'].includes(event))return res.status(400).json({error:'Неизвестное действие'});
   if(event==='message'&&req.body.peerId){
     const u=await getUser(req.user.id); const st=taskStateFor(u); const peerId=String(req.body.peerId);
     if(peerId&&peerId!==req.user.id&&!st.people.includes(peerId)){st.people.push(peerId);st.people=st.people.slice(-200);await pool.query('UPDATE users SET task_state=$1 WHERE id=$2',[JSON.stringify(st),req.user.id]);}
@@ -369,6 +371,7 @@ app.get('/api/rewards',auth,async(req,res)=>{
 function isOwnerAdmin(u){return String(u?.username||'').toLowerCase()==='dobry'}
 async function requireOwnerAdmin(req,res){const u=await getUser(req.user.id);if(!isOwnerAdmin(u)){res.status(403).json({error:'Доступ только для @dobry'});return null}return u}
 app.get('/api/admin/users',auth,async(req,res)=>{const admin=await requireOwnerAdmin(req,res);if(!admin)return;const q=String(req.query.q||'').trim().toLowerCase();const r=await pool.query("SELECT * FROM users WHERE ($1='' OR username ILIKE '%'||$1||'%' OR name ILIKE '%'||$1||'%') ORDER BY username LIMIT 50",[q]);res.json(r.rows.map(x=>({...publicUser(x),currency:Number(x.currency||0)})))});
+app.patch('/api/admin/users/:id/custom-color',auth,async(req,res)=>{const admin=await requireOwnerAdmin(req,res);if(!admin)return;const target=await getUser(req.params.id);if(!target)return res.status(404).json({error:'Пользователь не найден'});const enabled=req.body.enabled!==false;const r=await pool.query('UPDATE users SET custom_color_enabled=$1 WHERE id=$2 RETURNING *',[enabled,target.id]);res.json(publicUser(r.rows[0]));});
 app.patch('/api/admin/users/:id/currency',auth,async(req,res)=>{const admin=await requireOwnerAdmin(req,res);if(!admin)return;const target=await getUser(req.params.id);if(!target)return res.status(404).json({error:'Пользователь не найден'});const amount=Math.floor(Number(req.body.amount));if(!Number.isFinite(amount)||amount<=0||amount>1000000)return res.status(400).json({error:'Введите сумму от 1 до 1 000 000 SP'});const r=await pool.query('UPDATE users SET currency=currency+$1 WHERE id=$2 RETURNING currency',[amount,target.id]);res.json({ok:true,currency:Number(r.rows[0].currency||0)});});
 app.get('/api/push/public-key',auth,async(req,res)=>{
   const r=await pool.query('SELECT public_key FROM push_config WHERE id=1');
