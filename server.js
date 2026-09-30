@@ -198,7 +198,7 @@ async function applyActivity(uid,event,localDate,localHour){
  if(event==='visit'){
    if((hour>=22||hour<5)&&!st.nightDates.includes(date)){st.nightDates.push(date);st.nightDates=st.nightDates.slice(-60);changed=true}
    if(hour<5&&!st.midnightDates.includes(date)){st.midnightDates.push(date);st.midnightDates=st.midnightDates.slice(-60);changed=true}
- }else if(event==='group'){st.groups++;changed=true}
+ }else if(event==='group'){const gr=await pool.query('SELECT COUNT(*)::int AS count FROM groups WHERE created_by=$1',[uid]);st.groups=Math.max(st.groups,Number(gr.rows[0]?.count||0));changed=true}
  else if(event==='photo'){st.photos++;changed=true}
  else if(event==='voice'){st.voices++;changed=true}
  else if(event==='message'){st.messages++;changed=true}
