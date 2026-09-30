@@ -561,7 +561,7 @@ app.post('/api/messages/:uid',auth,async(req,res)=>{
   const m={id:id(),from:req.user.id,to,text:type==='text'?text:'',type,mediaUrl:type==='text'?'':mediaUrl,createdAt:Date.now(),edited:false,deleted:false,reactions:[]};
   await pool.query('INSERT INTO messages(id,"from","to",text,type,media_url,created_at) VALUES($1,$2,$3,$4,$5,$6,$7)',[m.id,m.from,m.to,m.text,m.type,m.mediaUrl,m.createdAt]);
   io.to(to).emit('message',m);
-  const local=new Date();const activityResult=await applyActivity(req.user.id,'message',local.getFullYear()+"-"+String(local.getMonth()+1).padStart(2,"0")+"-"+String(local.getDate()).padStart(2,"0"),local.getHours());
+  const local=new Date();const activityEvent=type==='image'?'photo':type==='audio'?'voice':'message';const activityResult=await applyActivity(req.user.id,activityEvent,local.getFullYear()+"-"+String(local.getMonth()+1).padStart(2,"0")+"-"+String(local.getDate()).padStart(2,"0"),local.getHours());
   res.json({...m,...activityResult});
 });
 
