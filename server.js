@@ -368,7 +368,8 @@ app.get('/api/rewards',auth,async(req,res)=>{
 });
 function isOwnerAdmin(u){return String(u?.username||'').toLowerCase()==='dobry'}
 async function requireOwnerAdmin(req,res){const u=await getUser(req.user.id);if(!isOwnerAdmin(u)){res.status(403).json({error:'Доступ только для @dobry'});return null}return u}
-app.get('/api/admin/users',auth,async(req,res)=>{const admin=await requireOwnerAdmin(req,res);if(!admin)return;const q=String(req.query.q||'').trim().toLowerCase();const r=await pool.query("SELECT * FROM users WHERE ($1='' OR username ILIKE '%'||$1||'%' OR name ILIKE '%'||$1||'%') ORDER BY username LIMIT 50",[q]);res.json(r.rows.map(publicUser))});
+app.get('/api/admin/users',auth,async(req,res)=>{const admin=await requireOwnerAdmin(req,res);if(!admin)return;const q=String(req.query.q||'').trim().toLowerCase();const r=await pool.query("SELECT * FROM users WHERE ($1='' OR username ILIKE '%'||$1||'%' OR name ILIKE '%'||$1||'%') ORDER BY username LIMIT 50",[q]);res.json(r.rows.map(x=>({...publicUser(x),currency:Number(x.currency||0)})))});
+app.patch('/api/admin/users/:id/currency',auth,async(req,res)=>{const admin=await requireOwnerAdmin(req,res);if(!admin)return;const target=await getUser(req.params.id);if(!target)return res.status(404).json({error:'Пользователь не найден'});const amount=Math.floor(Number(req.body.amount));if(!Number.isFinite(amount)||amount<=0||amount>1000000)return res.status(400).json({error:'Введите сумму от 1 до 1 000 000 SP'});const r=await pool.query('UPDATE users SET currency=currency+$1 WHERE id=$2 RETURNING currency',[amount,target.id]);res.json({ok:true,currency:Number(r.rows[0].currency||0)});});
 app.get('/api/push/public-key',auth,async(req,res)=>{
   const r=await pool.query('SELECT public_key FROM push_config WHERE id=1');
   res.json({publicKey:r.rows[0]?.public_key||''});
@@ -560,7 +561,8 @@ app.post('/api/messages/:uid',auth,async(req,res)=>{
   const m={id:id(),from:req.user.id,to,text:type==='text'?text:'',type,mediaUrl:type==='text'?'':mediaUrl,createdAt:Date.now(),edited:false,deleted:false,reactions:[]};
   await pool.query('INSERT INTO messages(id,"from","to",text,type,media_url,created_at) VALUES($1,$2,$3,$4,$5,$6,$7)',[m.id,m.from,m.to,m.text,m.type,m.mediaUrl,m.createdAt]);
   io.to(to).emit('message',m);
-  res.json(m);
+  const local=new Date();const activityResult=await applyActivity(req.user.id,'message',local.getFullYear()+"-"+String(local.getMonth()+1).padStart(2,"0")+"-"+String(local.getDate()).padStart(2,"0"),local.getHours());
+  res.json({...m,...activityResult});
 });
 
 app.get('/api/messages/:uid/pinned',auth,async(req,res)=>{
@@ -613,7 +615,7 @@ app.post('/api/groups',auth,async(req,res)=>{
   await client.query('BEGIN');
   await client.query('INSERT INTO groups(id,name,created_by,created_at) VALUES($1,$2,$3,$4)',[gid,name,req.user.id,now]);
   for(const uid of [...new Set([req.user.id,...members])]) await client.query('INSERT INTO group_members(group_id,user_id,role,joined_at) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING',[gid,uid,uid===req.user.id?'admin':'member',now]);
-  await client.query('COMMIT');res.json({id:gid,name,avatar:'',members:[...new Set([req.user.id,...members])].length});
+  await client.query('COMMIT');const local=new Date();const activityResult=await applyActivity(req.user.id,'group',local.getFullYear()+"-"+String(local.getMonth()+1).padStart(2,"0")+"-"+String(local.getDate()).padStart(2,"0"),local.getHours());res.json({id:gid,name,avatar:'',members:[...new Set([req.user.id,...members])].length,...activityResult});
  }catch(e){await client.query('ROLLBACK');res.status(500).json({error:'Не удалось создать группу'});}finally{client.release();}
 });
 app.get('/api/groups/:id/messages',auth,async(req,res)=>{
