@@ -131,7 +131,7 @@ async function profileSettings(){try{
    <div class=notice>3–24 символа: латинские буквы, цифры и _</div>
    <button class=primary onclick=saveProfileChanges()>Сохранить изменения</button>
   </div>
-  <div class=section><h3>ТИТУЛ</h3><div class=notice>Можно выбрать только один разблокированный титул.</div><select id=selectedTitle class=field onchange=selectProfileTitle(this.value)><option value="">Без титула</option>${rewardsData.rewards.filter(r=>r.type==="title"&&r.unlocked).map(r=>`<option value="${esc(r.name)}" ${me.selectedTitle===r.name?"selected":""}>${esc(r.name)}</option>`).join("")}</select></div>
+  <div class=section><h3>ТИТУЛ</h3><div class=notice>Можно выбрать только один разблокированный титул.</div><select id=selectedTitle class=field onchange=selectProfileTitle(this.value)><option value="">Без титула</option>${rewardsData.rewards.filter(r=>r.type==="title"&&(r.unlocked||(me.titleAwards||[]).includes(r.name))).map(r=>`<option value="${esc(r.name)}" ${me.selectedTitle===r.name?"selected":""}>${esc(r.name)}${(me.titleAwards||[]).includes(r.name)&&!r.unlocked?" ★":""}</option>`).join("")}</select></div>
   <div class=section>
    <h3>О СЕБЕ</h3>
    <textarea id=profileBio class=field rows=4 maxlength=160 placeholder="Напиши немного о себе...">${esc(bio)}</textarea>
