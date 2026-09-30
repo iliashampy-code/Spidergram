@@ -69,7 +69,6 @@ const publicUser=u=>({id:u.id,username:u.username,name:u.name||u.username,avatar
 const makeToken=u=>jwt.sign({id:u.id},SECRET,{expiresIn:'30d'});
 
 async function initDb(){
-  await pool.query(`UPDATE users SET shop_owned = COALESCE((SELECT json_agg(x) FROM json_array_elements_text(COALESCE(NULLIF(users.shop_owned,''),'[]')::json) x WHERE x <> 'msg_minimal'),'[]'), shop_equipped = CASE WHEN shop_equipped::json->>'message_style' = 'msg_minimal' THEN (shop_equipped::jsonb - 'message_style')::text ELSE shop_equipped END WHERE shop_owned LIKE '%msg_minimal%' OR shop_equipped LIKE '%msg_minimal%').catch(()=>{});
   if(!process.env.DATABASE_URL) throw new Error('DATABASE_URL не задан. Добавь PostgreSQL в Railway и подключи его к сервису.');
   await pool.query(`
     CREATE TABLE IF NOT EXISTS users(
@@ -106,6 +105,7 @@ async function initDb(){
     ALTER TABLE users ADD COLUMN IF NOT EXISTS custom_color_enabled BOOLEAN NOT NULL DEFAULT FALSE;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS shop_owned TEXT NOT NULL DEFAULT '[]';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS shop_equipped TEXT NOT NULL DEFAULT '{}';
+    UPDATE users SET shop_owned = COALESCE((SELECT json_agg(x) FROM json_array_elements_text(COALESCE(NULLIF(users.shop_owned,''),'[]')::json) x WHERE x <> 'msg_minimal'),'[]'), shop_equipped = CASE WHEN shop_equipped::json->>'message_style' = 'msg_minimal' THEN (shop_equipped::jsonb - 'message_style')::text ELSE shop_equipped END WHERE shop_owned LIKE '%msg_minimal%' OR shop_equipped LIKE '%msg_minimal%';
     CREATE TABLE IF NOT EXISTS groups(id TEXT PRIMARY KEY,name TEXT NOT NULL,avatar TEXT NOT NULL DEFAULT '',created_by TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,created_at BIGINT NOT NULL);
     CREATE TABLE IF NOT EXISTS group_members(group_id TEXT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,role TEXT NOT NULL DEFAULT 'member',joined_at BIGINT NOT NULL,PRIMARY KEY(group_id,user_id));
     CREATE TABLE IF NOT EXISTS group_messages(id TEXT PRIMARY KEY,group_id TEXT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,"from" TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,text TEXT NOT NULL DEFAULT '',type TEXT NOT NULL DEFAULT 'text',media_url TEXT NOT NULL DEFAULT '',created_at BIGINT NOT NULL,edited BOOLEAN NOT NULL DEFAULT FALSE,deleted BOOLEAN NOT NULL DEFAULT FALSE);
