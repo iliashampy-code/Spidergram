@@ -281,7 +281,7 @@ app.post('/api/activity',auth,async(req,res)=>{
 app.get('/api/shop',auth,async(req,res)=>{
  const u=await getUser(req.user.id); if(!u)return res.status(404).json({error:'Пользователь не найден'});
  const owned=parseJson(u.shop_owned,[]),equipped=parseJson(u.shop_equipped,{});
- res.json({currency:Number(u.currency||0),items:shopItems.map(x=>({...x,owned:owned.includes(x.id),equipped:equipped[x.type]===x.id})),equipped});
+ const st=taskStateFor(u); const tasks=[{id:'messages25',name:'Отправить 25 сообщений',reward:30,progress:Math.min(25,st.messages),target:25},{id:'group1',name:'Создать первую группу',reward:25,progress:Math.min(1,st.groups),target:1},{id:'photos3',name:'Отправить 3 фото',reward:40,progress:Math.min(3,st.photos),target:3},{id:'voices3',name:'Отправить 3 голосовых',reward:40,progress:Math.min(3,st.voices),target:3},{id:'people5',name:'Написать 5 разным людям',reward:50,progress:Math.min(5,st.people.length),target:5}].map(x=>({...x,claimed:!!st.claimed[x.id]})); res.json({currency:Number(u.currency||0),items:shopItems.map(x=>({...x,owned:owned.includes(x.id),equipped:equipped[x.type]===x.id})),equipped,tasks});
 });
 app.post('/api/shop/buy',auth,async(req,res)=>{
  const idv=String(req.body.id||''); const item=shopItems.find(x=>x.id===idv); if(!item)return res.status(404).json({error:'Товар не найден'});
