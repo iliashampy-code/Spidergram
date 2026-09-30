@@ -304,7 +304,9 @@ app.post('/api/shop/buy',auth,async(req,res)=>{
 app.post('/api/shop/equip',auth,async(req,res)=>{
  const item=shopItems.find(x=>x.id===String(req.body.id||'')); if(!item)return res.status(404).json({error:'Товар не найден'});
  const u=await getUser(req.user.id); const owned=parseJson(u.shop_owned,[]); if(!owned.includes(item.id))return res.status(403).json({error:'Сначала купите товар'});
- const equipped=parseJson(u.shop_equipped,{}); equipped[item.type]=item.id;
+ const equipped=parseJson(u.shop_equipped,{});
+ if(equipped[item.type]===item.id) delete equipped[item.type];
+ else equipped[item.type]=item.id;
  await pool.query('UPDATE users SET shop_equipped=$1 WHERE id=$2',[JSON.stringify(equipped),u.id]); res.json({ok:true,equipped});
 });
 app.get('/api/me',auth,async(req,res)=>{
