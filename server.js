@@ -193,6 +193,38 @@ async function initDb(){
 }
 
 function taskStateFor(u){const x=parseJson(u.task_state,{});return {nightDates:Array.isArray(x.nightDates)?x.nightDates:[],midnightDates:Array.isArray(x.midnightDates)?x.midnightDates:[],groups:Number(x.groups||0),messages:Number(x.messages||0),photos:Number(x.photos||0),voices:Number(x.voices||0),people:Array.isArray(x.people)?x.people:[],claimed:x.claimed&&typeof x.claimed==='object'?x.claimed:{},titles:Array.isArray(x.titles)?x.titles:[]};}
+async function syncTaskCounters(uid){
+ const u=await getUser(uid); if(!u)return null;
+ const st=taskStateFor(u);
+ const [gr,msg,people]=await Promise.all([
+  pool.query('SELECT COUNT(*)::int AS count FROM groups WHERE created_by=$1',[uid]),
+  pool.query('SELECT COUNT(*)::int AS count, COUNT(*) FILTER (WHERE type=\'image\')::int AS photos, COUNT(*) FILTER (WHERE type=\'audio\')::int AS voices FROM messages WHERE "from"=$1',[uid]),
+  pool.query('SELECT DISTINCT "to" AS id FROM messages WHERE "from"=$1 AND "to"<>$1',[uid])
+ ]);
+ st.groups=Math.max(st.groups,Number(gr.rows[0]?.count||0));
+ st.messages=Math.max(st.messages,Number(msg.rows[0]?.count||0));
+ st.photos=Math.max(st.photos,Number(msg.rows[0]?.photos||0));
+ st.voices=Math.max(st.voices,Number(msg.rows[0]?.voices||0));
+ const dbPeople=people.rows.map(x=>x.id).filter(Boolean);
+ st.people=Array.from(new Set([...st.people,...dbPeople])).slice(-200);
+ let currencyEarned=0;
+ const reward=(key,condition,amount)=>{if(condition&&!st.claimed[key]){st.claimed[key]=true;currencyEarned+=amount;}};
+ reward('messages25',st.messages>=25,30);
+ reward('group1',st.groups>=1,25);
+ reward('photos3',st.photos>=3,40);
+ reward('voices3',st.voices>=3,40);
+ reward('people5',st.people.length>=5,50);
+ const addTitle=(key)=>{if(!st.titles.includes(key))st.titles.push(key)};
+ if(st.nightDates.length>=1)addTitle('night_spider');
+ if(st.groups>=5)addTitle('big_boss');
+ if(st.people.length>=10)addTitle('friendly');
+ if(st.midnightDates.length>=5)addTitle('nightnik');
+ const awards=parseJson(u.title_awards,[]);
+ for(const key of st.titles){const t=taskTitleRewards.find(x=>x.key===key);if(t&&!awards.includes(t.name))awards.push(t.name)}
+ if(currencyEarned)await pool.query('UPDATE users SET currency=currency+$1 WHERE id=$2',[currencyEarned,uid]);
+ await pool.query('UPDATE users SET task_state=$1,title_awards=$2 WHERE id=$3',[JSON.stringify(st),JSON.stringify(awards),uid]);
+ return {currencyEarned,taskState:st};
+}
 async function applyActivity(uid,event,localDate,localHour){
  const u=await getUser(uid); if(!u)return {newTitles:[],currencyEarned:0};
  const st=taskStateFor(u); const hour=Math.max(0,Math.min(23,Number(localHour)||0)); const date=String(localDate||new Date().toISOString().slice(0,10)); let changed=false;
@@ -282,7 +314,9 @@ app.post('/api/activity',auth,async(req,res)=>{
  }catch(e){res.status(500).json({error:'Не удалось обновить задания'})}
 });
 app.get('/api/shop',auth,async(req,res)=>{
- const u=await getUser(req.user.id); if(!u)return res.status(404).json({error:'Пользователь не найден'});
+ let u=await getUser(req.user.id); if(!u)return res.status(404).json({error:'Пользователь не найден'});
+ await syncTaskCounters(u.id);
+ u=await getUser(u.id);
  const owned=parseJson(u.shop_owned,[]),equipped=parseJson(u.shop_equipped,{});
  const st=taskStateFor(u); const tasks=[{id:'messages25',name:'Отправить 25 сообщений',reward:30,progress:Math.min(25,st.messages),target:25},{id:'group1',name:'Создать первую группу',reward:25,progress:Math.min(1,st.groups),target:1},{id:'photos3',name:'Отправить 3 фото',reward:40,progress:Math.min(3,st.photos),target:3},{id:'voices3',name:'Отправить 3 голосовых',reward:40,progress:Math.min(3,st.voices),target:3},{id:'people5',name:'Написать 5 разным людям',reward:50,progress:Math.min(5,st.people.length),target:5}].map(x=>({...x,claimed:!!st.claimed[x.id]})); res.json({currency:Number(u.currency||0),items:shopItems.map(x=>({...x,owned:owned.includes(x.id),equipped:equipped[x.type]===x.id})),equipped,tasks});
 });
