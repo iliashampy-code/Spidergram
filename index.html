@@ -116,7 +116,7 @@ async function loadRewards(){try{
  const next=d.next?"Следующая награда: <b>"+esc(d.next.name)+"</b> через "+Math.max(0,d.next.days-d.days)+" дн.":"Все награды открыты";
  app.innerHTML="<div class=rewards-screen><button class=rewards-back onclick=profile()>‹ Настройки</button><div class=rewards-head><h2>🏆 Достижения</h2><p>Награды за время в SpiderGram</p></div><div class=rewards-progress><div style='font-size:12px;opacity:.8'>Общий прогресс</div><div class=rewards-track><div class=rewards-fill style='width:"+pct+"%'></div></div></div><div class=rewards-line><div class=rewards-nodes style='--reward-progress:"+pct+"%'>"+line+"</div></div><div class=rewards-info><b>"+d.days+" "+(d.days===1?"день":"дней")+" в SpiderGram</b><div class=next>"+next+"</div></div><div class='rewards-info' style='margin-top:10px'><b>🎯 Титулы за задания</b><div class='reward-task-list'>"+taskLine+"</div></div></div>";
  }catch(e){alert("Не удалось загрузить достижения: "+e.message)}}
-async function loadShop(){try{api("/api/shop").then(d=>{
+async function loadShop(){api("/api/shop").then(d=>{
  const grouped={};d.items.forEach(x=>(grouped[x.type]??=[]).push(x));
  const preview=x=>{
   if(x.type==="color")return"<div class='shop-preview color-preview'><div class=color-swatch style='background:"+esc(x.value)+"'></div></div>";
