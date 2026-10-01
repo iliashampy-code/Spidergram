@@ -24,8 +24,25 @@ const R2_ENABLED=!!(process.env.R2_ACCOUNT_ID&&process.env.R2_ACCESS_KEY_ID&&pro
 const R2_BUCKET=process.env.R2_BUCKET||'';
 const R2_MAX_IMAGE=100*1024*1024;
 const R2_MAX_VIDEO=500*1024*1024;
-const R2_MAX_AUDIO=100*1024*1024;
+const R2_MAX_AUDIO=10*1024*1024;
+// Защитный режим: не позволяем медиа приблизиться к бесплатному лимиту R2.
+const R2_SAFE_STORAGE_BYTES=8*1024*1024*1024;
+const R2_ECONOMY_STORAGE_BYTES=7*1024*1024*1024;
+const R2_ECONOMY_MEDIA_BYTES=12*1024*1024;
+
 const r2=R2_ENABLED?new S3Client({region:'auto',endpoint:`https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,credentials:{accessKeyId:process.env.R2_ACCESS_KEY_ID,secretAccessKey:process.env.R2_SECRET_ACCESS_KEY}}):null;
+async function r2UsageBytes(){
+  return Math.max(0,Number(process.env.R2_USED_BYTES||0));
+}
+async function r2UploadAllowed(type,size){
+  if(!R2_ENABLED)return {ok:false,error:'R2 не настроен'};
+  const used=await r2UsageBytes();
+  if(used>=R2_SAFE_STORAGE_BYTES)return {ok:false,error:'Хранилище медиа временно заполнено. Попробуйте позже.'};
+  const normal=type==='audio'?R2_MAX_AUDIO:(type==='image'?R2_MAX_IMAGE:R2_MAX_VIDEO);
+  const max=used>=R2_ECONOMY_STORAGE_BYTES?R2_ECONOMY_MEDIA_BYTES:normal;
+  if(size>max)return {ok:false,error:'Сейчас доступна загрузка файлов до '+Math.round(max/1024/1024)+' МБ'};
+  return {ok:true,maxBytes:max,economy:used>=R2_ECONOMY_STORAGE_BYTES};
+}
 async function r2GetUrl(key){
   if(!R2_ENABLED||!key)return '';
   return getSignedUrl(r2,new GetObjectCommand({Bucket:R2_BUCKET,Key:key}),{expiresIn:86400});
@@ -339,13 +356,15 @@ app.post('/api/media/upload-url',auth,async(req,res)=>{
   const limits={image:R2_MAX_IMAGE,video:R2_MAX_VIDEO,audio:R2_MAX_AUDIO};
   if(!limits[type])return res.status(400).json({error:'Неподдерживаемый тип файла'});
   if(!Number.isFinite(size)||size<=0||size>limits[type])return res.status(413).json({error:'Файл слишком большой. Лимит: '+Math.round(limits[type]/1024/1024)+' МБ'});
+  const allowed=await r2UploadAllowed(type,size);
+  if(!allowed.ok)return res.status(413).json({error:allowed.error});
   if(type==='image'&&!contentType.startsWith('image/'))return res.status(400).json({error:'Некорректный тип фото'});
   if(type==='video'&&!contentType.startsWith('video/'))return res.status(400).json({error:'Некорректный тип видео'});
   if(type==='audio'&&!contentType.startsWith('audio/'))return res.status(400).json({error:'Некорректный тип аудио'});
   const ext=(contentType.split('/')[1]||'bin').replace(/[^a-z0-9.+-]/gi,'').slice(0,12)||'bin';
   const key='media/'+req.user.id+'/'+Date.now()+'-'+crypto.randomUUID()+'.'+ext;
   const url=await getSignedUrl(r2,new PutObjectCommand({Bucket:R2_BUCKET,Key:key,ContentType:contentType}),{expiresIn:3600});
-  res.json({ok:true,key,url,maxBytes:limits[type]});
+  res.json({ok:true,key,url,maxBytes:allowed.maxBytes,economy:allowed.economy});
  }catch(e){console.error('R2 upload-url error',e);res.status(500).json({error:'Не удалось подготовить загрузку'});}
 });
 app.get('/api/health',async(req,res)=>{
