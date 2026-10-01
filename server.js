@@ -6,7 +6,7 @@ const bcrypt=require('bcryptjs');
 const jwt=require('jsonwebtoken');
 const cors=require('cors');
 const crypto=require('crypto');
-const {S3Client,PutObjectCommand,GetObjectCommand}=require('@aws-sdk/client-s3');
+const {S3Client,PutObjectCommand,GetObjectCommand,DeleteObjectCommand}=require('@aws-sdk/client-s3');
 const {getSignedUrl}=require('@aws-sdk/s3-request-presigner');
 const {Pool}=require('pg');
 const webpush=require('web-push');
@@ -32,7 +32,21 @@ const R2_ECONOMY_MEDIA_BYTES=12*1024*1024;
 
 const r2=R2_ENABLED?new S3Client({region:'auto',endpoint:`https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,credentials:{accessKeyId:process.env.R2_ACCESS_KEY_ID,secretAccessKey:process.env.R2_SECRET_ACCESS_KEY}}):null;
 async function r2UsageBytes(){
-  return Math.max(0,Number(process.env.R2_USED_BYTES||0));
+  if(!R2_ENABLED)return 0;
+  try{
+    const r=await pool.query('SELECT COALESCE(SUM(size_bytes),0)::bigint AS bytes FROM media_reservations WHERE expires_at IS NULL OR expires_at>$1',Date.now());
+    return Math.max(0,Number(r.rows[0]?.bytes||0));
+  }catch{return 0;}
+}
+async function cleanupExpiredR2Media(){
+  if(!R2_ENABLED)return;
+  try{
+    const r=await pool.query('SELECT id,object_key FROM media_reservations WHERE expires_at IS NOT NULL AND expires_at<=$1 LIMIT 100',Date.now());
+    for(const x of r.rows){
+      try{await r2.send(new DeleteObjectCommand({Bucket:R2_BUCKET,Key:x.object_key}));}catch(e){console.error('R2 delete error',e)}
+      await pool.query('DELETE FROM media_reservations WHERE id=$1',[x.id]);
+    }
+  }catch(e){console.error('R2 cleanup error',e)}
 }
 async function r2UploadAllowed(type,size){
   if(!R2_ENABLED)return {ok:false,error:'R2 не настроен'};
@@ -148,6 +162,16 @@ const makeToken=u=>jwt.sign({id:u.id},SECRET,{expiresIn:'30d'});
 async function initDb(){
   if(!process.env.DATABASE_URL) throw new Error('DATABASE_URL не задан. Добавь PostgreSQL в Railway и подключи его к сервису.');
   await pool.query(`
+    CREATE TABLE IF NOT EXISTS media_reservations(
+      id TEXT PRIMARY KEY,
+      object_key TEXT UNIQUE NOT NULL,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      media_type TEXT NOT NULL,
+      size_bytes BIGINT NOT NULL,
+      created_at BIGINT NOT NULL,
+      expires_at BIGINT
+    );
+    CREATE INDEX IF NOT EXISTS media_reservations_expiry_idx ON media_reservations(expires_at);
     CREATE TABLE IF NOT EXISTS users(
       id TEXT PRIMARY KEY,
       username TEXT UNIQUE NOT NULL,
@@ -363,6 +387,20 @@ app.post('/api/media/upload-url',auth,async(req,res)=>{
   if(type==='audio'&&!contentType.startsWith('audio/'))return res.status(400).json({error:'Некорректный тип аудио'});
   const ext=(contentType.split('/')[1]||'bin').replace(/[^a-z0-9.+-]/gi,'').slice(0,12)||'bin';
   const key='media/'+req.user.id+'/'+Date.now()+'-'+crypto.randomUUID()+'.'+ext;
+  const expiresAt=type==='image'||type==='video'?Date.now()+20*24*60*60*1000:null;
+  const db=await pool.connect();
+  try{
+    await db.query('BEGIN');
+    await db.query('SELECT pg_advisory_xact_lock(7192026)');
+    const used=await db.query('SELECT COALESCE(SUM(size_bytes),0)::bigint AS bytes FROM media_reservations WHERE expires_at IS NULL OR expires_at>$1',[Date.now()]);
+    const reserved=Number(used.rows[0]?.bytes||0);
+    if(reserved+size>R2_SAFE_STORAGE_BYTES){
+      await db.query('ROLLBACK');
+      return res.status(413).json({error:'Хранилище медиа заполнено. Небольшие файлы снова станут доступны после автоматического удаления старых фото и видео.'});
+    }
+    await db.query('INSERT INTO media_reservations(id,object_key,user_id,media_type,size_bytes,created_at,expires_at) VALUES($1,$2,$3,$4,$5,$6,$7)',[crypto.randomUUID(),key,req.user.id,type,size,Date.now(),expiresAt]);
+    await db.query('COMMIT');
+  }catch(e){try{await db.query('ROLLBACK')}catch{};throw e}finally{db.release()}
   const url=await getSignedUrl(r2,new PutObjectCommand({Bucket:R2_BUCKET,Key:key,ContentType:contentType}),{expiresIn:3600});
   res.json({ok:true,key,url,maxBytes:allowed.maxBytes,economy:allowed.economy});
  }catch(e){console.error('R2 upload-url error',e);res.status(500).json({error:'Не удалось подготовить загрузку'});}
