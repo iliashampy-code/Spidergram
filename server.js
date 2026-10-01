@@ -48,6 +48,15 @@ const taskTitleRewards=[
 const taskTitleNames=taskTitleRewards.map(x=>x.name);
 const shopItems=[
  {id:'color_cyan',type:'color',name:'Неоновый голубой',price:60,value:'#00d9ff',description:'Цвет интерфейса'},
+ {id:'color_slate',type:'color',name:'Тёмно-серый',price:65,value:'#64748b',description:'Сдержанный тёмно-серый цвет интерфейса'},
+ {id:'color_graphite',type:'color',name:'Графитовый',price:70,value:'#7c8796',description:'Контрастный графитовый цвет интерфейса'},
+ {id:'color_red',type:'color',name:'Красный',price:70,value:'#ef4444',description:'Яркий красный цвет интерфейса'},
+ {id:'color_orange',type:'color',name:'Оранжевый',price:70,value:'#f97316',description:'Тёплый оранжевый цвет интерфейса'},
+ {id:'color_amber',type:'color',name:'Янтарный',price:75,value:'#f59e0b',description:'Янтарный цвет интерфейса'},
+ {id:'color_teal',type:'color',name:'Бирюзовый',price:70,value:'#14b8a6',description:'Контрастный бирюзовый цвет интерфейса'},
+ {id:'color_pink',type:'color',name:'Розовый',price:75,value:'#ec4899',description:'Яркий розовый цвет интерфейса'},
+ {id:'color_indigo',type:'color',name:'Индиго',price:75,value:'#6366f1',description:'Насыщенный индиго-цвет интерфейса'},
+ {id:'color_cyan',type:'color',name:'Неоновый голубой',price:60,value:'#00d9ff',description:'Цвет интерфейса'},
  {id:'color_purple',type:'color',name:'Неоновый фиолетовый',price:70,value:'#a855f7',description:'Цвет интерфейса'},
  {id:'color_lime',type:'color',name:'Салатовый',price:70,value:'#a3e635',description:'Цвет интерфейса'},
  {id:'gradient_aurora',type:'gradient',name:'Aurora',price:120,value:'linear-gradient(135deg,#0ea5e9,#8b5cf6,#ec4899)',start:'#0ea5e9',end:'#ec4899',description:'Градиент интерфейса'},
