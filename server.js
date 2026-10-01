@@ -65,6 +65,23 @@ const shopItems=[
  {id:'frame_gold',type:'avatar_frame',name:'Золотая рамка',price:220,value:'gold',description:'Рамка вокруг аватара'},
  {id:'effect_glow',type:'profile_effect',name:'Glow',price:250,value:'glow',description:'Эффект профиля'},
  {id:'effect_pulse',type:'profile_effect',name:'Pulse',price:300,value:'pulse',description:'Анимированный эффект профиля'},
+ 
+ {id:'bg_sunset',type:'background',name:'Закат',price:110,value:'sunset',description:'Тёплый особый фон сообщений'},
+ {id:'bg_ocean',type:'background',name:'Глубокий океан',price:120,value:'ocean',description:'Сине-голубой особый фон сообщений'},
+ {id:'bg_matrix',type:'background',name:'Matrix',price:140,value:'matrix',description:'Зелёный цифровой фон сообщений'},
+ {id:'bg_neon',type:'animated_background',name:'Neon Flow',price:260,value:'neon',description:'Анимированный неоновый фон'},
+ {id:'bg_rain',type:'animated_background',name:'Cyber Rain',price:280,value:'rain',description:'Анимированный дождь'},
+ {id:'bg_sunset_anim',type:'animated_background',name:'Живой закат',price:290,value:'sunset_anim',description:'Плавный анимированный закат'},
+ {id:'msg_neon',type:'message_style',name:'Neon',price:170,value:'neon',description:'Неоновый стиль сообщений'},
+ {id:'msg_soft',type:'message_style',name:'Soft',price:130,value:'soft',description:'Мягкий стиль сообщений'},
+ {id:'msg_outline',type:'message_style',name:'Outline',price:160,value:'outline',description:'Контурный стиль сообщений'},
+ {id:'frame_ice',type:'avatar_frame',name:'Ледяная рамка',price:200,value:'ice',description:'Голубая сияющая рамка'},
+ {id:'frame_fire',type:'avatar_frame',name:'Огненная рамка',price:230,value:'fire',description:'Красно-оранжевая рамка'},
+ {id:'frame_purple',type:'avatar_frame',name:'Фиолетовая рамка',price:210,value:'purple',description:'Фиолетовое свечение'},
+ {id:'frame_diamond',type:'avatar_frame',name:'Алмазная рамка',price:260,value:'diamond',description:'Переливающаяся рамка'},
+ {id:'effect_ring',type:'profile_effect',name:'Energy Ring',price:280,value:'ring',description:'Энергетическое кольцо вокруг профиля'},
+ {id:'effect_shadow',type:'profile_effect',name:'Shadow',price:190,value:'shadow',description:'Глубокая тень профиля'},
+ {id:'effect_spark',type:'profile_effect',name:'Spark',price:320,value:'spark',description:'Анимированное свечение профиля'},
  {id:'title_weakling',type:'title',name:'Доходяга',price:250,value:'Доходяга',start:'#111111',end:'#38bdf8',animated:false,description:'Чёрно-голубой титул'},
  {id:'title_error404',type:'title',name:'Error 404',price:350,value:'Error 404',start:'#38bdf8',end:'#ffffff',animated:true,description:'Голубой-белый анимированный титул'}
 ];
@@ -384,7 +401,7 @@ app.get('/api/rewards',auth,async(req,res)=>{
  const st=taskStateFor(u);
  const taskTitles=taskTitleRewards.map(r=>({...r,type:'task',unlocked:st.titles.includes(r.key)}));
  const next=rewards.find(r=>!r.unlocked)||null;
- const shopTitles=shopItems.filter(x=>x.type==='title').map(x=>({key:x.id,name:x.name,type:'shop',start:x.start,end:x.end,animated:!!x.animated,unlocked:parseJson(u.shop_owned,[]).includes(x.id)})); res.json({days,rewards,current:currentReward(days),next,progress:next?Math.min(100,Math.round(days/next.days*100)):100,taskTitles,shopTitles});
+ const currencyTasks=[{id:'messages25',name:'Отправить 25 сообщений',reward:30,progress:Math.min(25,st.messages),target:25},{id:'group1',name:'Создать первую группу',reward:25,progress:Math.min(1,st.groups),target:1},{id:'photos3',name:'Отправить 3 фото',reward:40,progress:Math.min(3,st.photos),target:3},{id:'voices3',name:'Отправить 3 голосовых',reward:40,progress:Math.min(3,st.voices),target:3},{id:'people5',name:'Написать 5 разным людям',reward:50,progress:Math.min(5,st.people.length),target:5},{id:'messages50',name:'Отправить 50 сообщений',reward:60,progress:Math.min(50,st.messages),target:50},{id:'groups3',name:'Создать 3 группы',reward:50,progress:Math.min(3,st.groups),target:3},{id:'photos10',name:'Отправить 10 фото',reward:80,progress:Math.min(10,st.photos),target:10},{id:'voices10',name:'Отправить 10 голосовых',reward:80,progress:Math.min(10,st.voices),target:10},{id:'people15',name:'Написать 15 разным людям',reward:100,progress:Math.min(15,st.people.length),target:15}].map(x=>({...x,claimed:!!st.claimed[x.id]})); const shopTitles=shopItems.filter(x=>x.type==='title').map(x=>({key:x.id,name:x.name,type:'shop',start:x.start,end:x.end,animated:!!x.animated,unlocked:parseJson(u.shop_owned,[]).includes(x.id)})); res.json({days,rewards,current:currentReward(days),next,progress:next?Math.min(100,Math.round(days/next.days*100)):100,taskTitles,shopTitles,currencyTasks});
 });
 function isOwnerAdmin(u){return String(u?.username||'').toLowerCase()==='dobry'}
 async function requireOwnerAdmin(req,res){const u=await getUser(req.user.id);if(!isOwnerAdmin(u)){res.status(403).json({error:'Доступ только для @dobry'});return null}return u}
@@ -444,7 +461,7 @@ app.patch('/api/admin/users/:id/title',auth,async(req,res)=>{const admin=await r
 app.delete('/api/admin/users/:id/title',auth,async(req,res)=>{const admin=await requireOwnerAdmin(req,res);if(!admin)return;const target=await getUser(req.params.id);if(!target)return res.status(404).json({error:'Пользователь не найден'});let awards=[];try{awards=JSON.parse(target.title_awards||'[]')}catch{}if(target.selected_title)awards=awards.filter(x=>x!==target.selected_title);await pool.query('UPDATE users SET selected_title=$1,custom_title=$2,title_awards=$3 WHERE id=$4',['','',JSON.stringify(awards),target.id]);res.json(publicUser(await getUser(target.id)))});
 
 app.patch('/api/admin/users/:id/titles/all',auth,async(req,res)=>{const admin=await requireOwnerAdmin(req,res);if(!admin)return;const target=await getUser(req.params.id);if(!target)return res.status(404).json({error:'Пользователь не найден'});const all=rewardForDays(356).filter(x=>x.type==='title').map(x=>x.name);let awards=[];try{awards=JSON.parse(target.title_awards||'[]')}catch{}awards=Array.from(new Set([...awards,...all]));await pool.query('UPDATE users SET title_awards=$1 WHERE id=$2',[JSON.stringify(awards),target.id]);res.json(publicUser(await getUser(target.id)))});
-app.patch('/api/admin/users/:id/check',auth,async(req,res)=>{const admin=await requireOwnerAdmin(req,res);if(!admin)return;const target=await getUser(req.params.id);if(!target)return res.status(404).json({error:'Пользователь не найден'});const enabled=req.body.enabled!==false;await pool.query('UPDATE users SET admin_check=$1 WHERE id=$2',[enabled,target.id]);res.json(publicUser(await getUser(target.id)))});
+app.delete('/api/admin/users/:id/titles/all',auth,async(req,res)=>{const admin=await requireOwnerAdmin(req,res);if(!admin)return;const target=await getUser(req.params.id);if(!target)return res.status(404).json({error:'Пользователь не найден'});await pool.query('UPDATE users SET selected_title=$1,custom_title=$2,title_awards=$3 WHERE id=$4',['','',JSON.stringify([]),target.id]);res.json(publicUser(await getUser(target.id)))});app.patch('/api/admin/users/:id/check',auth,async(req,res)=>{const admin=await requireOwnerAdmin(req,res);if(!admin)return;const target=await getUser(req.params.id);if(!target)return res.status(404).json({error:'Пользователь не найден'});const enabled=req.body.enabled!==false;await pool.query('UPDATE users SET admin_check=$1 WHERE id=$2',[enabled,target.id]);res.json(publicUser(await getUser(target.id)))});
 app.get('/api/stats',auth,async(req,res)=>{try{const [u,m,g,o]=await Promise.all([pool.query('SELECT COUNT(*)::int count FROM users'),pool.query('SELECT COUNT(*)::int count FROM messages'),pool.query('SELECT COUNT(*)::int count FROM groups'),pool.query('SELECT COUNT(*)::int count FROM users WHERE online=true')]);res.json({users:u.rows[0].count,messages:m.rows[0].count,groups:g.rows[0].count,online:o.rows[0].count})}catch(e){res.status(500).json({error:'Не удалось загрузить статистику'})}});
 app.get('/api/users',auth,async(req,res)=>{
   const q=String(req.query.q||'').trim().toLowerCase();
