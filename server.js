@@ -886,5 +886,8 @@ io.on('connection',async socket=>{
 app.get('/',(req,res)=>res.sendFile(path.join(ROOT,'index.html')));
 app.get('/index.html',(req,res)=>res.sendFile(path.join(ROOT,'index.html')));
 
-initDb().then(()=>server.listen(PORT,'0.0.0.0',()=>console.log(`SpiderGram server listening on port ${PORT} with PostgreSQL`)))
+initDb().then(()=>server.listen(PORT,'0.0.0.0',()=>{
+  console.log(`SpiderGram server listening on port ${PORT} with PostgreSQL`);
+  if(R2_ENABLED){cleanupExpiredR2Media();setInterval(cleanupExpiredR2Media,60*60*1000);}
+}))
 .catch(e=>{console.error(e);process.exit(1);});
