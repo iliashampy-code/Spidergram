@@ -41,7 +41,9 @@ const taskTitleRewards=[
  {key:'big_boss',name:'Big boss',start:'#111111',end:'#ef4444',animated:true,description:'Создать 5 групп'},
  {key:'friendly',name:'дружелюбный',start:'#a3e635',end:'#a3e635',animated:false,description:'Отправить сообщение 10 разным людям'},
  {key:'nightnik',name:'ночник',start:'#111111',end:'#fff1a8',animated:true,description:'Использовать мессенджер после 00:00 5 раз'},
- {key:'batman',name:'batman',start:'#111111',end:'#facc15',animated:true,description:'Отправить сообщение в 3:00–4:00 ночи'}
+ {key:'batman',name:'batman',start:'#111111',end:'#facc15',animated:true,description:'Отправить сообщение в 3:00–4:00 ночи'}, {key:'living_legend',name:'живая легенда',start:'#facc15',end:'#ffffff',animated:true,description:'Отправить 100 сообщений'},
+ {key:'love',name:'Love',start:'#111111',end:'#ec4899',animated:true,description:'Написать 25 разным людям'},
+ {key:'emperor',name:'Император',start:'#111111',end:'#facc15',animated:true,description:'Создать 10 групп и отправить 100 сообщений'}
 ];
 const shopItems=[
  {id:'color_cyan',type:'color',name:'Неоновый голубой',price:60,value:'#00d9ff',description:'Цвет интерфейса'},
@@ -202,6 +204,7 @@ async function applyActivity(uid,event,localDate,localHour){
  const u=await getUser(uid); if(!u)return {newTitles:[],currencyEarned:0};
  const st=taskStateFor(u); const hour=Math.max(0,Math.min(23,Number(localHour)||0)); const date=String(localDate||new Date().toISOString().slice(0,10)); let changed=false;
  if(event==='visit'){
+   if(!st.claimed['daily_login_'+date]){st.claimed['daily_login_'+date]=true;await pool.query('UPDATE users SET currency=currency+10 WHERE id=$1',[uid]);changed=true}
    if((hour>=22||hour<5)&&!st.nightDates.includes(date)){st.nightDates.push(date);st.nightDates=st.nightDates.slice(-60);changed=true}
    if(hour<5&&!st.midnightDates.includes(date)){st.midnightDates.push(date);st.midnightDates=st.midnightDates.slice(-60);changed=true}
  }else if(event==='group'){const gr=await pool.query('SELECT COUNT(*)::int AS count FROM groups WHERE created_by=$1',[uid]);st.groups=Math.max(st.groups,Number(gr.rows[0]?.count||0));changed=true}
@@ -216,6 +219,9 @@ async function applyActivity(uid,event,localDate,localHour){
  if(st.people.length>=10)addTitle('friendly');
  if(st.midnightDates.length>=5)addTitle('nightnik');
  if((event==='message'||event==='message_time')&&hour>=3&&hour<4)addTitle('batman');
+ if(st.messages>=100)addTitle('living_legend');
+ if(st.people.length>=25)addTitle('love');
+ if(st.groups>=10&&st.messages>=100)addTitle('emperor');
 
  let currencyEarned=0; const reward=(key,condition,amount)=>{if(condition&&!st.claimed[key]){st.claimed[key]=true;currencyEarned+=amount;changed=true}};
  reward('messages25',st.messages>=25,30);
@@ -223,6 +229,11 @@ async function applyActivity(uid,event,localDate,localHour){
  reward('photos3',st.photos>=3,40);
  reward('voices3',st.voices>=3,40);
  reward('people5',st.people.length>=5,50);
+ reward('messages50',st.messages>=50,60);
+ reward('groups3',st.groups>=3,50);
+ reward('photos10',st.photos>=10,80);
+ reward('voices10',st.voices>=10,80);
+ reward('people15',st.people.length>=15,100);
  if(currencyEarned)await pool.query('UPDATE users SET currency=currency+$1 WHERE id=$2',[currencyEarned,uid]);
  if(newTitles.length){let awards=parseJson(u.title_awards,[]);for(const t of newTitles){if(t&&!awards.includes(t.name))awards.push(t.name)}await pool.query('UPDATE users SET title_awards=$1 WHERE id=$2',[JSON.stringify(awards),uid]);}
  if(changed)await pool.query('UPDATE users SET task_state=$1 WHERE id=$2',[JSON.stringify(st),uid]);
