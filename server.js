@@ -178,6 +178,19 @@ async function initDb(){
      created_at BIGINT NOT NULL,edited BOOLEAN NOT NULL DEFAULT FALSE,deleted BOOLEAN NOT NULL DEFAULT FALSE
     );
     CREATE INDEX IF NOT EXISTS group_messages_idx ON group_messages(group_id,created_at);
+    CREATE TABLE IF NOT EXISTS saved_messages(
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      original_message_id TEXT NOT NULL,
+      sender_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      text TEXT NOT NULL DEFAULT '',
+      type TEXT NOT NULL DEFAULT 'text',
+      media_url TEXT NOT NULL DEFAULT '',
+      created_at BIGINT NOT NULL,
+      saved_at BIGINT NOT NULL,
+      UNIQUE(user_id,original_message_id)
+    );
+    CREATE INDEX IF NOT EXISTS saved_messages_user_idx ON saved_messages(user_id,saved_at);
     CREATE TABLE IF NOT EXISTS hidden_chats(
       user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       peer_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -508,7 +521,7 @@ app.get('/api/notifications',auth,async(req,res)=>{
   await pool.query('UPDATE call_notifications SET read=true WHERE to_user_id=$1 AND read=false',[req.user.id]);
   res.json(r.rows.map(x=>({id:x.id,type:'call',from:{id:x.from_id,username:x.username,name:x.name,avatar:x.avatar||''},createdAt:Number(x.created_at)})));
 });
-app.patch('/api/admin/users/:id/title',auth,async(req,res)=>{const admin=await requireOwnerAdmin(req,res);if(!admin)return;const target=await getUser(req.params.id);if(!target)return res.status(404).json({error:'Пользователь не найден'});const title=String(req.body.title||'').trim().slice(0,50);const selectedTitle=String(req.body.selectedTitle||'').trim().slice(0,60);if(selectedTitle){const reward=rewardForDays(356).find(x=>x.type==='title'&&x.name===selectedTitle);if(!reward)return res.status(400).json({error:'Такого титула за достижение нет'});let awards=[];try{awards=JSON.parse(target.title_awards||'[]')}catch{}awards=Array.from(new Set([...awards,selectedTitle]));await pool.query('UPDATE users SET selected_title=$1,custom_title=$2,title_awards=$3 WHERE id=$4',[selectedTitle,'',JSON.stringify(awards),target.id]);}else{let awards=[];try{awards=JSON.parse(target.title_awards||'[]')}catch{}if(title){awards=Array.from(new Set([...awards,title]));await pool.query('UPDATE users SET selected_title=$1,custom_title=$2,title_awards=$3 WHERE id=$4',[title,'',JSON.stringify(awards),target.id]);}else{await pool.query('UPDATE users SET selected_title=$1,custom_title=$2 WHERE id=$3',['','',target.id]);}}res.json(publicUser(await getUser(target.id)))});
+app.patch('/api/admin/users/:id/title',auth,async(req,res)=>{const admin=await requireOwnerAdmin(req,res);if(!admin)return;const target=await getUser(req.params.id);if(!target)return res.status(404).json({error:'Пользователь не найден'});const title=String(req.body.title||'').trim().slice(0,50);const selectedTitle=String(req.body.selectedTitle||'').trim().slice(0,60);if(selectedTitle){let awards=[];try{awards=JSON.parse(target.title_awards||'[]')}catch{}awards=Array.from(new Set([...awards,selectedTitle]));await pool.query('UPDATE users SET selected_title=$1,custom_title=$2,title_awards=$3 WHERE id=$4',[selectedTitle,'',JSON.stringify(awards),target.id]);}else{let awards=[];try{awards=JSON.parse(target.title_awards||'[]')}catch{}if(title){awards=Array.from(new Set([...awards,title]));await pool.query('UPDATE users SET selected_title=$1,custom_title=$2,title_awards=$3 WHERE id=$4',[title,'',JSON.stringify(awards),target.id]);}else{await pool.query('UPDATE users SET selected_title=$1,custom_title=$2 WHERE id=$3',['','',target.id]);}}res.json(publicUser(await getUser(target.id)))});
 app.delete('/api/admin/users/:id/title',auth,async(req,res)=>{const admin=await requireOwnerAdmin(req,res);if(!admin)return;const target=await getUser(req.params.id);if(!target)return res.status(404).json({error:'Пользователь не найден'});let awards=[];try{awards=JSON.parse(target.title_awards||'[]')}catch{}if(target.selected_title)awards=awards.filter(x=>x!==target.selected_title);await pool.query('UPDATE users SET selected_title=$1,custom_title=$2,title_awards=$3 WHERE id=$4',['','',JSON.stringify(awards),target.id]);res.json(publicUser(await getUser(target.id)))});
 
 app.patch('/api/admin/users/:id/titles/all',auth,async(req,res)=>{const admin=await requireOwnerAdmin(req,res);if(!admin)return;const target=await getUser(req.params.id);if(!target)return res.status(404).json({error:'Пользователь не найден'});const all=rewardForDays(356).filter(x=>x.type==='title').map(x=>x.name);let awards=[];try{awards=JSON.parse(target.title_awards||'[]')}catch{}awards=Array.from(new Set([...awards,...all]));await pool.query('UPDATE users SET title_awards=$1 WHERE id=$2',[JSON.stringify(awards),target.id]);res.json(publicUser(await getUser(target.id)))});
@@ -517,6 +530,21 @@ app.get('/api/admin/promos',auth,async(req,res)=>{const admin=await requireOwner
 app.post('/api/admin/promos',auth,async(req,res)=>{const admin=await requireOwnerAdmin(req,res);if(!admin)return;const code=String(req.body.code||'').trim().toUpperCase().replace(/[^A-Z0-9_-]/g,'').slice(0,40);const rewardSp=Math.floor(Number(req.body.rewardSp||0));const rewardTitle=String(req.body.rewardTitle||'').trim().slice(0,60);const maxUses=Math.floor(Number(req.body.maxUses||0));if(!code)return res.status(400).json({error:'Введите код'});if(rewardSp<0||rewardSp>1000000)return res.status(400).json({error:'SP: от 0 до 1 000 000'});if(!rewardSp&&!rewardTitle)return res.status(400).json({error:'Укажите награду'});if(maxUses<0||maxUses>1000000)return res.status(400).json({error:'Лимит: от 0 до 1 000 000'});try{await pool.query('INSERT INTO promo_codes(code,reward_sp,reward_title,max_uses,uses,created_at) VALUES($1,$2,$3,$4,0,$5)',[code,rewardSp,rewardTitle,maxUses,Date.now()]);res.json({ok:true})}catch(e){if(e.code==='23505')return res.status(400).json({error:'Такой промокод уже существует'});throw e}});
 app.delete('/api/admin/promos/:code',auth,async(req,res)=>{const admin=await requireOwnerAdmin(req,res);if(!admin)return;await pool.query('DELETE FROM promo_codes WHERE code=$1',[String(req.params.code||'').toUpperCase()]);res.json({ok:true})});
 app.get('/api/stats',auth,async(req,res)=>{try{const [u,m,g,o]=await Promise.all([pool.query('SELECT COUNT(*)::int count FROM users'),pool.query('SELECT COUNT(*)::int count FROM messages'),pool.query('SELECT COUNT(*)::int count FROM groups'),pool.query('SELECT COUNT(*)::int count FROM users WHERE online=true')]);res.json({users:u.rows[0].count,messages:m.rows[0].count,groups:g.rows[0].count,online:o.rows[0].count})}catch(e){res.status(500).json({error:'Не удалось загрузить статистику'})}});
+app.get('/api/saved-messages',auth,async(req,res)=>{
+ const r=await pool.query('SELECT s.*,u.username,u.name,u.avatar FROM saved_messages s JOIN users u ON u.id=s.sender_id WHERE s.user_id=$1 ORDER BY s.saved_at ASC',[req.user.id]);
+ res.json(r.rows.map(x=>({id:x.id,originalMessageId:x.original_message_id,text:x.text,type:x.type,mediaUrl:x.media_url,createdAt:Number(x.created_at),savedAt:Number(x.saved_at),sender:{id:x.sender_id,username:x.username,name:x.name,avatar:x.avatar||''}})));
+});
+app.post('/api/saved-messages/:id',auth,async(req,res)=>{
+ const m=await pool.query('SELECT * FROM messages WHERE id=$1 AND ("from"=$2 OR "to"=$2)',[req.params.id,req.user.id]);
+ if(!m.rowCount)return res.status(404).json({error:'Сообщение не найдено'});
+ const x=m.rows[0], id='saved_'+crypto.randomUUID();
+ await pool.query('INSERT INTO saved_messages(id,user_id,original_message_id,sender_id,text,type,media_url,created_at,saved_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT(user_id,original_message_id) DO NOTHING',[id,req.user.id,x.id,x.from,x.text||'',x.type||'text',x.media_url||'',x.created_at,Date.now()]);
+ res.json({ok:true});
+});
+app.delete('/api/saved-messages/:id',auth,async(req,res)=>{
+ await pool.query('DELETE FROM saved_messages WHERE user_id=$1 AND (id=$2 OR original_message_id=$2)',[req.user.id,req.params.id]);
+ res.json({ok:true});
+});
 app.get('/api/users',auth,async(req,res)=>{
   const q=String(req.query.q||'').trim().toLowerCase();
   const r=await pool.query(`SELECT * FROM users WHERE id<>$1 AND ($2='' OR username ILIKE '%'||$2||'%' OR name ILIKE '%'||$2||'%') ORDER BY username LIMIT 50`,[req.user.id,q]);
