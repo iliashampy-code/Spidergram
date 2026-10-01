@@ -6,8 +6,6 @@ const bcrypt=require('bcryptjs');
 const jwt=require('jsonwebtoken');
 const cors=require('cors');
 const crypto=require('crypto');
-const {S3Client,PutObjectCommand,GetObjectCommand,DeleteObjectCommand}=require('@aws-sdk/client-s3');
-const {getSignedUrl}=require('@aws-sdk/s3-request-presigner');
 const {Pool}=require('pg');
 const webpush=require('web-push');
 
@@ -20,47 +18,6 @@ app.use(express.json({limit:'20mb'}));
 const ROOT=__dirname;
 const SECRET=process.env.JWT_SECRET||'CHANGE_THIS_SPIDERGRAM_SECRET_2026';
 const PORT=Number(process.env.PORT||3000);
-const R2_ENABLED=!!(process.env.R2_ACCOUNT_ID&&process.env.R2_ACCESS_KEY_ID&&process.env.R2_SECRET_ACCESS_KEY&&process.env.R2_BUCKET);
-const R2_BUCKET=process.env.R2_BUCKET||'';
-const R2_MAX_IMAGE=12*1024*1024;
-const R2_MAX_VIDEO=12*1024*1024;
-const R2_MAX_AUDIO=10*1024*1024;
-// Защитный режим: не позволяем медиа приблизиться к бесплатному лимиту R2.
-const R2_SAFE_STORAGE_BYTES=8*1024*1024*1024;
-const R2_ECONOMY_STORAGE_BYTES=7*1024*1024*1024;
-const R2_ECONOMY_MEDIA_BYTES=12*1024*1024;
-
-const r2=R2_ENABLED?new S3Client({region:'auto',endpoint:`https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,credentials:{accessKeyId:process.env.R2_ACCESS_KEY_ID,secretAccessKey:process.env.R2_SECRET_ACCESS_KEY}}):null;
-async function r2UsageBytes(){
-  if(!R2_ENABLED)return 0;
-  try{
-    const r=await pool.query('SELECT COALESCE(SUM(size_bytes),0)::bigint AS bytes FROM media_reservations WHERE expires_at IS NULL OR expires_at>$1',Date.now());
-    return Math.max(0,Number(r.rows[0]?.bytes||0));
-  }catch{return 0;}
-}
-async function cleanupExpiredR2Media(){
-  if(!R2_ENABLED)return;
-  try{
-    const r=await pool.query('SELECT id,object_key FROM media_reservations WHERE expires_at IS NOT NULL AND expires_at<=$1 LIMIT 100',Date.now());
-    for(const x of r.rows){
-      try{await r2.send(new DeleteObjectCommand({Bucket:R2_BUCKET,Key:x.object_key}));}catch(e){console.error('R2 delete error',e)}
-      await pool.query('DELETE FROM media_reservations WHERE id=$1',[x.id]);
-    }
-  }catch(e){console.error('R2 cleanup error',e)}
-}
-async function r2UploadAllowed(type,size){
-  if(!R2_ENABLED)return {ok:false,error:'R2 не настроен'};
-  const used=await r2UsageBytes();
-  if(used>=R2_SAFE_STORAGE_BYTES)return {ok:false,error:'Хранилище медиа временно заполнено. Попробуйте позже.'};
-  const normal=type==='audio'?R2_MAX_AUDIO:(type==='image'?R2_MAX_IMAGE:R2_MAX_VIDEO);
-  const max=used>=R2_ECONOMY_STORAGE_BYTES?R2_ECONOMY_MEDIA_BYTES:normal;
-  if(size>max)return {ok:false,error:'Сейчас доступна загрузка файлов до '+Math.round(max/1024/1024)+' МБ'};
-  return {ok:true,maxBytes:max,economy:used>=R2_ECONOMY_STORAGE_BYTES};
-}
-async function r2GetUrl(key){
-  if(!R2_ENABLED||!key)return '';
-  return getSignedUrl(r2,new GetObjectCommand({Bucket:R2_BUCKET,Key:key}),{expiresIn:86400});
-}
 const pool=new Pool({connectionString:process.env.DATABASE_URL,ssl:process.env.DATABASE_URL?{rejectUnauthorized:false}:false});
 
 const id=()=>crypto.randomUUID();
@@ -399,39 +356,6 @@ async function auth(req,res,next){
   }catch{res.status(401).json({error:'Требуется вход'});}
 }
 
-app.post('/api/media/upload-url',auth,async(req,res)=>{
- try{
-  if(!R2_ENABLED)return res.status(503).json({error:'R2 не настроен'});
-  const type=String(req.body.type||''); const contentType=String(req.body.contentType||'application/octet-stream');
-  const size=Math.floor(Number(req.body.size||0));
-  const limits={image:R2_MAX_IMAGE,video:R2_MAX_VIDEO,audio:R2_MAX_AUDIO};
-  if(!limits[type])return res.status(400).json({error:'Неподдерживаемый тип файла'});
-  if(!Number.isFinite(size)||size<=0||size>limits[type])return res.status(413).json({error:'Файл слишком большой. Лимит: '+Math.round(limits[type]/1024/1024)+' МБ'});
-  const allowed=await r2UploadAllowed(type,size);
-  if(!allowed.ok)return res.status(413).json({error:allowed.error});
-  if(type==='image'&&!contentType.startsWith('image/'))return res.status(400).json({error:'Некорректный тип фото'});
-  if(type==='video'&&!contentType.startsWith('video/'))return res.status(400).json({error:'Некорректный тип видео'});
-  if(type==='audio'&&!contentType.startsWith('audio/'))return res.status(400).json({error:'Некорректный тип аудио'});
-  const ext=(contentType.split('/')[1]||'bin').replace(/[^a-z0-9.+-]/gi,'').slice(0,12)||'bin';
-  const key='media/'+req.user.id+'/'+Date.now()+'-'+crypto.randomUUID()+'.'+ext;
-  const expiresAt=type==='image'||type==='video'?Date.now()+20*24*60*60*1000:null;
-  const db=await pool.connect();
-  try{
-    await db.query('BEGIN');
-    await db.query('SELECT pg_advisory_xact_lock(7192026)');
-    const used=await db.query('SELECT COALESCE(SUM(size_bytes),0)::bigint AS bytes FROM media_reservations WHERE expires_at IS NULL OR expires_at>$1',[Date.now()]);
-    const reserved=Number(used.rows[0]?.bytes||0);
-    if(reserved+size>R2_SAFE_STORAGE_BYTES){
-      await db.query('ROLLBACK');
-      return res.status(413).json({error:'Хранилище медиа заполнено. Небольшие файлы снова станут доступны после автоматического удаления старых фото и видео.'});
-    }
-    await db.query('INSERT INTO media_reservations(id,object_key,user_id,media_type,size_bytes,created_at,expires_at) VALUES($1,$2,$3,$4,$5,$6,$7)',[crypto.randomUUID(),key,req.user.id,type,size,Date.now(),expiresAt]);
-    await db.query('COMMIT');
-  }catch(e){try{await db.query('ROLLBACK')}catch{};throw e}finally{db.release()}
-  const url=await getSignedUrl(r2,new PutObjectCommand({Bucket:R2_BUCKET,Key:key,ContentType:contentType}),{expiresIn:3600});
-  res.json({ok:true,key,url,maxBytes:allowed.maxBytes,economy:allowed.economy});
- }catch(e){console.error('R2 upload-url error',e);res.status(500).json({error:'Не удалось подготовить загрузку'});}
-});
 app.get('/api/health',async(req,res)=>{
   try{await pool.query('SELECT 1');res.json({ok:true,app:'SpiderGram',version:'4.0',database:'postgresql'});}
   catch(e){res.status(503).json({ok:false,app:'SpiderGram',error:'Database unavailable'});}
@@ -789,7 +713,7 @@ app.get('/api/messages/:uid',auth,async(req,res)=>{
   const ids=r.rows.map(m=>m.id);
   let rx=[];
   if(ids.length){const q=await pool.query('SELECT message_id,user_id,emoji FROM reactions WHERE message_id=ANY($1)',[ids]);rx=q.rows;}
-  const out=[];for(const m of r.rows.reverse()){let media=m.deleted?'':m.media_url;if(media?.startsWith('r2:'))media=await r2GetUrl(media.slice(3));out.push({id:m.id,from:m.from,to:m.to,text:m.deleted?'Сообщение удалено':m.text,type:m.deleted?'deleted':m.type,mediaUrl:media,createdAt:Number(m.created_at),edited:!!m.edited,deleted:!!m.deleted,read:m.from===req.user.id&&peerLastRead>=Number(m.created_at),reactions:rx.filter(x=>x.message_id===m.id).map(x=>({userId:x.user_id,emoji:x.emoji}))})}res.json(out);
+  const out=[];for(const m of r.rows.reverse()){let media=m.deleted?'':m.media_url;out.push({id:m.id,from:m.from,to:m.to,text:m.deleted?'Сообщение удалено':m.text,type:m.deleted?'deleted':m.type,mediaUrl:media,createdAt:Number(m.created_at),edited:!!m.edited,deleted:!!m.deleted,read:m.from===req.user.id&&peerLastRead>=Number(m.created_at),reactions:rx.filter(x=>x.message_id===m.id).map(x=>({userId:x.user_id,emoji:x.emoji}))})}res.json(out);
 });
 
 app.post('/api/messages/:uid',auth,async(req,res)=>{
@@ -797,8 +721,7 @@ app.post('/api/messages/:uid',auth,async(req,res)=>{
   if(to===req.user.id)return res.status(400).json({error:'Нельзя отправить сообщение самому себе'});
   if(!await getUser(to))return res.status(404).json({error:'Пользователь не найден'});
   if(type==='text'){if(!text||text.length>4000)return res.status(400).json({error:'Сообщение пустое или длиннее 4000 символов'});}
-  else if(type==='image'){if(mediaUrl.startsWith('r2:')){}else if(!mediaUrl.startsWith('data:image/'))return res.status(400).json({error:'Некорректное изображение'});else if(mediaUrl.length>16800000)return res.status(413).json({error:'Фото слишком большое'});}
-  else if(type==='video'){if(!mediaUrl.startsWith('r2:'))return res.status(400).json({error:'Некорректное видео'});}
+  else if(type==='image'||type==='video'){const prefix=type==='image'?'data:image/':'data:video/';if(!mediaUrl.startsWith(prefix))return res.status(400).json({error:type==='image'?'Некорректное изображение':'Некорректное видео'});if(mediaUrl.length>16800000)return res.status(413).json({error:(type==='image'?'Фото':'Видео')+' слишком большое. Лимит: 12 МБ'});}
   else if(type==='audio'){if(mediaUrl.startsWith('r2:')){}else if(!mediaUrl.startsWith('data:audio/'))return res.status(400).json({error:'Некорректное аудио'});else if(mediaUrl.length>7000000)return res.status(413).json({error:'Голосовое слишком большое'});}
   else return res.status(400).json({error:'Неизвестный тип сообщения'});
   await pool.query('DELETE FROM hidden_chats WHERE user_id=$1 AND peer_id=$2',[req.user.id,to]);
@@ -825,7 +748,7 @@ app.patch('/api/messages/:id',auth,async(req,res)=>{
   if(!text||text.length>4000)return res.status(400).json({error:'Сообщение пустое или слишком длинное'});
   const r=await pool.query("UPDATE messages SET text=$1,edited=true WHERE id=$2 AND \"from\"=$3 AND type='text' AND deleted=false RETURNING id,\"from\",\"to\",text,type,media_url,created_at,edited,deleted",[text,req.params.id,req.user.id]);
   if(!r.rowCount)return res.status(404).json({error:'Сообщение не найдено или его нельзя изменить'});
-  const m=r.rows[0]; const out={id:m.id,from:m.from,to:m.to,text:m.text,type:m.type,mediaUrl:m.media_url?.startsWith('r2:')?await r2GetUrl(m.media_url.slice(3)):m.media_url,createdAt:Number(m.created_at),edited:true,deleted:false,reactions:[]};
+  const m=r.rows[0]; const out={id:m.id,from:m.from,to:m.to,text:m.text,type:m.type,mediaUrl:m.media_url,createdAt:Number(m.created_at),edited:true,deleted:false,reactions:[]};
   io.to(m.to).emit('message:update',out); io.to(m.from).emit('message:update',out); res.json(out);
 });
 app.delete('/api/messages/:id',auth,async(req,res)=>{
@@ -866,7 +789,7 @@ app.get('/api/groups/:id/messages',auth,async(req,res)=>{
  const ok=await pool.query('SELECT 1 FROM group_members WHERE group_id=$1 AND user_id=$2',[req.params.id,req.user.id]);
  if(!ok.rowCount)return res.status(403).json({error:'Нет доступа'});
  const r=await pool.query('SELECT id,"from",text,type,media_url,created_at,edited,deleted FROM group_messages WHERE group_id=$1 ORDER BY created_at DESC LIMIT 300',[req.params.id]);
- const out=[];for(const m of r.rows.reverse()){let media=m.deleted?'':m.media_url;if(media?.startsWith('r2:'))media=await r2GetUrl(media.slice(3));out.push({id:m.id,from:m.from,text:m.deleted?'Сообщение удалено':m.text,type:m.deleted?'deleted':m.type,mediaUrl:media,createdAt:Number(m.created_at),edited:!!m.edited,deleted:!!m.deleted})}res.json(out);
+ const out=[];for(const m of r.rows.reverse()){let media=m.deleted?'':m.media_url;out.push({id:m.id,from:m.from,text:m.deleted?'Сообщение удалено':m.text,type:m.deleted?'deleted':m.type,mediaUrl:media,createdAt:Number(m.created_at),edited:!!m.edited,deleted:!!m.deleted})}res.json(out);
 });
 app.post('/api/groups/:id/messages',auth,async(req,res)=>{
  const ok=await pool.query('SELECT 1 FROM group_members WHERE group_id=$1 AND user_id=$2',[req.params.id,req.user.id]);
@@ -911,6 +834,6 @@ app.get('/index.html',(req,res)=>res.sendFile(path.join(ROOT,'index.html')));
 
 initDb().then(()=>server.listen(PORT,'0.0.0.0',()=>{
   console.log(`SpiderGram server listening on port ${PORT} with PostgreSQL`);
-  if(R2_ENABLED){cleanupExpiredR2Media();setInterval(cleanupExpiredR2Media,60*60*1000);}
+  
 }))
 .catch(e=>{console.error(e);process.exit(1);});
