@@ -80,6 +80,8 @@ function rewardForDays(days){
  return rewards;
 }
 const taskTitleRewards=[
+ {key:'collector',name:'Коллекционер',start:'#67e8f9',end:'#ffffff',animated:true,description:'Выполнить 10 достижений'},
+ {key:'unstoppable',name:'Без остановки',start:'#ff2d00',end:'#ffd000',animated:true,description:'Заходить в SpiderGram 3 дня подряд'},
  {key:'night_spider',name:'night spider',start:'#102a72',end:'#ffffff',animated:true,description:'Использовать SpiderGram ночью'},
  {key:'big_boss',name:'Big boss',start:'#111111',end:'#ef4444',animated:true,description:'Создать 5 групп'},
  {key:'friendly',name:'дружелюбный',start:'#a3e635',end:'#a3e635',animated:false,description:'Отправить сообщение 10 разным людям'},
@@ -319,12 +321,23 @@ async function initDb(){
   }
 }
 
-function taskStateFor(u){const x=parseJson(u.task_state,{});return {nightDates:Array.isArray(x.nightDates)?x.nightDates:[],midnightDates:Array.isArray(x.midnightDates)?x.midnightDates:[],groups:Number(x.groups||0),messages:Number(x.messages||0),photos:Number(x.photos||0),voices:Number(x.voices||0),people:Array.isArray(x.people)?x.people:[],claimed:x.claimed&&typeof x.claimed==='object'?x.claimed:{},titles:Array.isArray(x.titles)?x.titles:[]};}
-async function applyActivity(uid,event,localDate,localHour){
+function taskStateFor(u){const x=parseJson(u.task_state,{});return {nightDates:Array.isArray(x.nightDates)?x.nightDates:[],midnightDates:Array.isArray(x.midnightDates)?x.midnightDates:[],groups:Number(x.groups||0),messages:Number(x.messages||0),photos:Number(x.photos||0),voices:Number(x.voices||0),people:Array.isArray(x.people)?x.people:[],claimed:x.claimed&&typeof x.claimed==='object'?x.claimed:{},titles:Array.isArray(x.titles)?x.titles:[],dailyDate:String(x.dailyDate||''),dailyTasks:Array.isArray(x.dailyTasks)?x.dailyTasks:[],dailyProgress:x.dailyProgress&&typeof x.dailyProgress==='object'?x.dailyProgress:{}};}
+const DAILY_CURRENCY_TASK_POOL=[
+ {id:'daily_messages10',name:'Отправить 10 сообщений',event:'message',target:10,reward:20},
+ {id:'daily_people3',name:'Написать 3 разным людям',event:'people',target:3,reward:30},
+ {id:'daily_photos3',name:'Отправить 3 фотографии',event:'photo',target:3,reward:25},
+ {id:'daily_voices2',name:'Отправить 2 голосовых',event:'voice',target:2,reward:25},
+ {id:'daily_group1',name:'Создать 1 группу',event:'group',target:1,reward:30},
+ {id:'daily_favorite2',name:'Сохранить 2 сообщения в избранное',event:'favorite',target:2,reward:20}
+];
+function dailyTasksForDate(date){let seed=0;for(const ch of String(date))seed=(seed*31+ch.charCodeAt(0))>>>0;const a=[...DAILY_CURRENCY_TASK_POOL];for(let i=a.length-1;i>0;i--){seed=(seed*1664525+1013904223)>>>0;const j=seed%(i+1);[a[i],a[j]]=[a[j],a[i]];}return a.slice(0,3);}
+
+async function applyActivity(uid,event,localDate,localHour,extra={}){
  const u=await getUser(uid); if(!u)return {newTitles:[],currencyEarned:0};
- const st=taskStateFor(u); const hour=Math.max(0,Math.min(23,Number(localHour)||0)); const date=String(localDate||new Date().toISOString().slice(0,10)); let changed=false;
+ const st=taskStateFor(u); const hour=Math.max(0,Math.min(23,Number(localHour)||0)); const date=String(localDate||new Date().toISOString().slice(0,10)); let changed=false; let currencyEarned=0;
+ if(st.dailyDate!==date){st.dailyDate=date;st.dailyTasks=dailyTasksForDate(date).map(x=>x.id);st.dailyProgress={};changed=true;}
  if(event==='visit'){
-   if(!st.claimed['daily_login_'+date]){st.claimed['daily_login_'+date]=true;await pool.query('UPDATE users SET currency=currency+10 WHERE id=$1',[uid]);changed=true}
+   if(!st.claimed['daily_login_'+date]){st.claimed['daily_login_'+date]=true;currencyEarned+=10;changed=true}
    if((hour>=22||hour<5)&&!st.nightDates.includes(date)){st.nightDates.push(date);st.nightDates=st.nightDates.slice(-60);changed=true}
    if(hour<5&&!st.midnightDates.includes(date)){st.midnightDates.push(date);st.midnightDates=st.midnightDates.slice(-60);changed=true}
  }else if(event==='group'){st.groups++;changed=true}
@@ -334,6 +347,12 @@ async function applyActivity(uid,event,localDate,localHour){
  else if(event==='message_time'){changed=true}
 
  const newTitles=[]; const addTitle=(key)=>{if(!st.titles.includes(key)){st.titles.push(key);newTitles.push(taskTitleRewards.find(x=>x.key===key));changed=true}};
+ const achievementCount=rewardForDays(Math.max(0,Math.floor((Date.now()-Number(u.created_at||Date.now()))/86400000))).filter(x=>x.type==='title').length + st.titles.filter(x=>!['collector','unstoppable'].includes(x)).length;
+ if(achievementCount>=10)addTitle('collector');
+ const previousVisitDates=st.claimed._visitDates&&Array.isArray(st.claimed._visitDates)?st.claimed._visitDates:[];
+ if(event==='visit'&&!previousVisitDates.includes(date)){previousVisitDates.push(date);st.claimed._visitDates=previousVisitDates.slice(-60);changed=true;}
+ let consecutive=0;if(previousVisitDates.length){const ds=[...previousVisitDates].sort().reverse();consecutive=1;for(let i=1;i<ds.length;i++){const a=new Date(ds[i-1]+'T12:00:00'),b=new Date(ds[i]+'T12:00:00');if(Math.round((a-b)/86400000)===1)consecutive++;else break;}}
+ if(consecutive>=3)addTitle('unstoppable');
  if(st.nightDates.length>=1)addTitle('night_spider');
  if(st.groups>=5)addTitle('big_boss');
  if(st.people.length>=10)addTitle('friendly');
@@ -343,7 +362,7 @@ async function applyActivity(uid,event,localDate,localHour){
  if(st.people.length>=25)addTitle('love');
  if(st.groups>=10&&st.messages>=100)addTitle('emperor');
 
- let currencyEarned=0; const reward=(key,condition,amount)=>{if(condition&&!st.claimed[key]){st.claimed[key]=true;currencyEarned+=amount;changed=true}};
+ const reward=(key,condition,amount)=>{if(condition&&!st.claimed[key]){st.claimed[key]=true;currencyEarned+=amount;changed=true}};
  reward('messages25',st.messages>=25,30);
  reward('group1',st.groups>=1,25);
  reward('photos3',st.photos>=3,40);
@@ -354,6 +373,9 @@ async function applyActivity(uid,event,localDate,localHour){
  reward('photos10',st.photos>=10,80);
  reward('voices10',st.voices>=10,80);
  reward('people15',st.people.length>=15,100);
+ if(extra.peerId&&event==='message'){const pid=String(extra.peerId);if(pid&&pid!==uid&&!st.people.includes(pid)){st.people.push(pid);st.people=st.people.slice(-200);changed=true;}}
+ const dailyEvent=event==='message'?'message':event==='photo'?'photo':event==='voice'?'voice':event==='group'?'group':event==='favorite'?'favorite':null;
+ if(dailyEvent){for(const taskId of st.dailyTasks){const task=DAILY_CURRENCY_TASK_POOL.find(x=>x.id===taskId);if(!task)continue;let inc=task.event===dailyEvent?1:0;if(task.event==='people'&&event==='message'&&extra.peerId)inc=st.people.includes(String(extra.peerId))?1:0;if(!inc)continue;st.dailyProgress[taskId]=Math.min(task.target,Number(st.dailyProgress[taskId]||0)+inc);changed=true;if(st.dailyProgress[taskId]>=task.target&&!st.claimed['daily_'+date+'_'+taskId]){st.claimed['daily_'+date+'_'+taskId]=true;currencyEarned+=task.reward;}}}
  if(currencyEarned)await pool.query('UPDATE users SET currency=currency+$1 WHERE id=$2',[currencyEarned,uid]);
  if(newTitles.length){let awards=parseJson(u.title_awards,[]);for(const t of newTitles){if(t&&!awards.includes(t.name))awards.push(t.name)}await pool.query('UPDATE users SET title_awards=$1 WHERE id=$2',[JSON.stringify(awards),uid]);}
  if(changed)await pool.query('UPDATE users SET task_state=$1 WHERE id=$2',[JSON.stringify(st),uid]);
@@ -442,11 +464,7 @@ app.post('/api/activity',auth,async(req,res)=>{
   const localDate=String(req.body.localDate||'').slice(0,10);
   const localHour=Number(req.body.localHour);
   if(!['visit','message','group','photo','voice','message_time'].includes(event))return res.status(400).json({error:'Неизвестное действие'});
-  if(event==='message'&&req.body.peerId){
-    const u=await getUser(req.user.id); const st=taskStateFor(u); const peerId=String(req.body.peerId);
-    if(peerId&&peerId!==req.user.id&&!st.people.includes(peerId)){st.people.push(peerId);st.people=st.people.slice(-200);await pool.query('UPDATE users SET task_state=$1 WHERE id=$2',[JSON.stringify(st),req.user.id]);}
-  }
-  const result=await applyActivity(req.user.id,event,localDate,localHour);
+  const result=await applyActivity(req.user.id,event,localDate,localHour,{peerId:req.body.peerId||''});
   res.json(result);
  }catch(e){res.status(500).json({error:'Не удалось обновить задания'})}
 });
@@ -535,9 +553,9 @@ app.get('/api/rewards',auth,async(req,res)=>{
  const days=Math.max(0,Math.floor((Date.now()-Number(u.created_at||Date.now()))/86400000));
  const rewards=rewardForDays(days).map(r=>({...r,unlocked:days>=r.days}));
  const st=taskStateFor(u);
- const taskTitles=taskTitleRewards.map(r=>{let progress=0,target=1,progressText='';switch(r.key){case'night_spider':progress=Math.min(1,st.nightDates.length);break;case'big_boss':progress=Math.min(5,st.groups);target=5;break;case'friendly':progress=Math.min(10,st.people.length);target=10;break;case'nightnik':progress=Math.min(5,st.midnightDates.length);target=5;break;case'batman':progress=st.titles.includes('batman')?1:0;break;case'living_legend':progress=Math.min(100,st.messages);target=100;break;case'love':progress=Math.min(25,st.people.length);target=25;break;case'emperor':{const g=Math.min(10,st.groups)/10,m=Math.min(100,st.messages)/100;progress=Math.round(Math.min(g,m)*100);target=100;progressText='Группы '+Math.min(10,st.groups)+'/10 · сообщения '+Math.min(100,st.messages)+'/100';break}}return {...r,type:'task',progress,target,progressPercent:target?Math.min(100,Math.round(progress/target*100)):0,progressText,unlocked:st.titles.includes(r.key)}});
+ const taskTitles=taskTitleRewards.map(r=>{let progress=0,target=1,progressText='';switch(r.key){case'collector':progress=Math.min(10,rewardForDays(days).filter(x=>x.type==='title'&&days>=x.days).length+st.titles.filter(x=>!['collector','unstoppable'].includes(x)).length);target=10;break;case'unstoppable':{const ds=(st.claimed._visitDates&&Array.isArray(st.claimed._visitDates)?st.claimed._visitDates:[]).slice().sort().reverse();progress=ds.length?1:0;for(let i=1;i<ds.length;i++){const a=new Date(ds[i-1]+'T12:00:00'),b=new Date(ds[i]+'T12:00:00');if(Math.round((a-b)/86400000)===1)progress++;else break;}progress=Math.min(3,progress);target=3;break}case'night_spider':progress=Math.min(1,st.nightDates.length);break;case'big_boss':progress=Math.min(5,st.groups);target=5;break;case'friendly':progress=Math.min(10,st.people.length);target=10;break;case'nightnik':progress=Math.min(5,st.midnightDates.length);target=5;break;case'batman':progress=st.titles.includes('batman')?1:0;break;case'living_legend':progress=Math.min(100,st.messages);target=100;break;case'love':progress=Math.min(25,st.people.length);target=25;break;case'emperor':{const g=Math.min(10,st.groups)/10,m=Math.min(100,st.messages)/100;progress=Math.round(Math.min(g,m)*100);target=100;progressText='Группы '+Math.min(10,st.groups)+'/10 · сообщения '+Math.min(100,st.messages)+'/100';break}}return {...r,type:'task',progress,target,progressPercent:target?Math.min(100,Math.round(progress/target*100)):0,progressText,unlocked:st.titles.includes(r.key)}});
  const next=rewards.find(r=>!r.unlocked)||null;
- const currencyTasks=[{id:'messages25',name:'Отправить 25 сообщений',reward:30,progress:Math.min(25,st.messages),target:25},{id:'group1',name:'Создать первую группу',reward:25,progress:Math.min(1,st.groups),target:1},{id:'photos3',name:'Отправить 3 фото',reward:40,progress:Math.min(3,st.photos),target:3},{id:'voices3',name:'Отправить 3 голосовых',reward:40,progress:Math.min(3,st.voices),target:3},{id:'people5',name:'Написать 5 разным людям',reward:50,progress:Math.min(5,st.people.length),target:5},{id:'messages50',name:'Отправить 50 сообщений',reward:60,progress:Math.min(50,st.messages),target:50},{id:'groups3',name:'Создать 3 группы',reward:50,progress:Math.min(3,st.groups),target:3},{id:'photos10',name:'Отправить 10 фото',reward:80,progress:Math.min(10,st.photos),target:10},{id:'voices10',name:'Отправить 10 голосовых',reward:80,progress:Math.min(10,st.voices),target:10},{id:'people15',name:'Написать 15 разным людям',reward:100,progress:Math.min(15,st.people.length),target:15}].map(x=>({...x,claimed:!!st.claimed[x.id]})); const shopTitles=shopItems.filter(x=>x.type==='title').map(x=>({key:x.id,name:x.name,type:'shop',start:x.start,end:x.end,animated:!!x.animated,unlocked:parseJson(u.shop_owned,[]).includes(x.id)})); res.json({days,rewards,current:currentReward(days),next,progress:next?Math.min(100,Math.round(days/next.days*100)):100,taskTitles,shopTitles,currencyTasks});
+ const currencyTasks=[{id:'messages25',name:'Отправить 25 сообщений',reward:30,progress:Math.min(25,st.messages),target:25},{id:'group1',name:'Создать первую группу',reward:25,progress:Math.min(1,st.groups),target:1},{id:'photos3',name:'Отправить 3 фото',reward:40,progress:Math.min(3,st.photos),target:3},{id:'voices3',name:'Отправить 3 голосовых',reward:40,progress:Math.min(3,st.voices),target:3},{id:'people5',name:'Написать 5 разным людям',reward:50,progress:Math.min(5,st.people.length),target:5},{id:'messages50',name:'Отправить 50 сообщений',reward:60,progress:Math.min(50,st.messages),target:50},{id:'groups3',name:'Создать 3 группы',reward:50,progress:Math.min(3,st.groups),target:3},{id:'photos10',name:'Отправить 10 фото',reward:80,progress:Math.min(10,st.photos),target:10},{id:'voices10',name:'Отправить 10 голосовых',reward:80,progress:Math.min(10,st.voices),target:10},{id:'people15',name:'Написать 15 разным людям',reward:100,progress:Math.min(15,st.people.length),target:15}].map(x=>({...x,claimed:!!st.claimed[x.id]})); const dailyTasks=st.dailyTasks.map(id=>DAILY_CURRENCY_TASK_POOL.find(x=>x.id===id)).filter(Boolean).map(x=>({...x,progress:Math.min(x.target,Number(st.dailyProgress[x.id]||0)),claimed:!!st.claimed['daily_'+st.dailyDate+'_'+x.id]})); const shopTitles=shopItems.filter(x=>x.type==='title').map(x=>({key:x.id,name:x.name,type:'shop',start:x.start,end:x.end,animated:!!x.animated,unlocked:parseJson(u.shop_owned,[]).includes(x.id)})); res.json({days,rewards,current:currentReward(days),next,progress:next?Math.min(100,Math.round(days/next.days*100)):100,taskTitles,shopTitles,currencyTasks,dailyTasks,dailyDate:st.dailyDate});
 });
 function isOwnerAdmin(u){return String(u?.username||'').toLowerCase()==='dobry'}
 async function requireOwnerAdmin(req,res){const u=await getUser(req.user.id);if(!isOwnerAdmin(u)){res.status(403).json({error:'Доступ только для @dobry'});return null}return u}
@@ -566,7 +584,7 @@ app.post('/api/promo/redeem',auth,async(req,res)=>{
  }catch(e){await pool.query('ROLLBACK');throw e}
 });
 app.patch('/api/admin/users/:id/custom-color',auth,async(req,res)=>{const admin=await requireOwnerAdmin(req,res);if(!admin)return;const target=await getUser(req.params.id);if(!target)return res.status(404).json({error:'Пользователь не найден'});const enabled=req.body.enabled!==false;const r=await pool.query('UPDATE users SET custom_color_enabled=$1 WHERE id=$2 RETURNING *',[enabled,target.id]);res.json(publicUser(r.rows[0]));});
-app.patch('/api/admin/users/:id/currency',auth,async(req,res)=>{const admin=await requireOwnerAdmin(req,res);if(!admin)return;const target=await getUser(req.params.id);if(!target)return res.status(404).json({error:'Пользователь не найден'});const amount=Math.floor(Number(req.body.amount));if(!Number.isFinite(amount)||amount<=0||amount>1000000)return res.status(400).json({error:'Введите сумму от 1 до 1 000 000 SP'});const r=await pool.query('UPDATE users SET currency=currency+$1 WHERE id=$2 RETURNING currency',[amount,target.id]);res.json({ok:true,currency:Number(r.rows[0].currency||0)});});
+app.patch('/api/admin/users/:id/currency',auth,async(req,res)=>{const admin=await requireOwnerAdmin(req,res);if(!admin)return;const target=await getUser(req.params.id);if(!target)return res.status(404).json({error:'Пользователь не найден'});const amount=Math.floor(Number(req.body.amount));if(!Number.isFinite(amount)||amount<=0||amount>1000000)return res.status(400).json({error:'Введите сумму от 1 до 1 000 000 SP'});const r=await pool.query('UPDATE users SET currency=currency+$1 WHERE id=$2 RETURNING currency',[amount,target.id]);io.to(target.id).emit('currency:notify',{amount});res.json({ok:true,currency:Number(r.rows[0].currency||0)});});
 app.get('/api/push/public-key',auth,async(req,res)=>{
   const r=await pool.query('SELECT public_key FROM push_config WHERE id=1');
   res.json({publicKey:r.rows[0]?.public_key||''});
@@ -782,7 +800,7 @@ app.post('/api/messages/:uid',auth,async(req,res)=>{
   const sender=await getUser(req.user.id);const storedMedia=mediaUrl.startsWith('r2:')?mediaUrl:mediaUrl;const m={id:id(),from:req.user.id,to,text:type==='text'?text:'',type,mediaUrl:type==='text'?'':storedMedia,createdAt:Date.now(),edited:false,deleted:false,reactions:[],sender:sender?{id:sender.id,name:sender.name,username:sender.username,avatar:sender.avatar}:null};
   await pool.query('INSERT INTO messages(id,"from","to",text,type,media_url,created_at) VALUES($1,$2,$3,$4,$5,$6,$7)',[m.id,m.from,m.to,m.text,m.type,m.mediaUrl,m.createdAt]);
   const socketMedia=m.mediaUrl?.startsWith('r2:')?await r2GetUrl(m.mediaUrl.slice(3)):m.mediaUrl;io.to(to).emit('message',{...m,mediaUrl:socketMedia});m.mediaUrl=socketMedia;
-  const local=new Date();const activityEvent=type==='image'?'photo':type==='audio'?'voice':'message';const activityResult=await applyActivity(req.user.id,activityEvent,local.getFullYear()+"-"+String(local.getMonth()+1).padStart(2,"0")+"-"+String(local.getDate()).padStart(2,"0"),local.getHours());
+  const local=new Date();const activityEvent=type==='image'?'photo':type==='audio'?'voice':'message';const activityResult=await applyActivity(req.user.id,activityEvent,local.getFullYear()+"-"+String(local.getMonth()+1).padStart(2,"0")+"-"+String(local.getDate()).padStart(2,"0"),local.getHours(),{peerId:to});
   res.json({...m,...activityResult});
 });
 
