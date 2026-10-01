@@ -6,6 +6,8 @@ const bcrypt=require('bcryptjs');
 const jwt=require('jsonwebtoken');
 const cors=require('cors');
 const crypto=require('crypto');
+const {S3Client,PutObjectCommand,GetObjectCommand}=require('@aws-sdk/client-s3');
+const {getSignedUrl}=require('@aws-sdk/s3-request-presigner');
 const {Pool}=require('pg');
 const webpush=require('web-push');
 
@@ -18,6 +20,16 @@ app.use(express.json({limit:'20mb'}));
 const ROOT=__dirname;
 const SECRET=process.env.JWT_SECRET||'CHANGE_THIS_SPIDERGRAM_SECRET_2026';
 const PORT=Number(process.env.PORT||3000);
+const R2_ENABLED=!!(process.env.R2_ACCOUNT_ID&&process.env.R2_ACCESS_KEY_ID&&process.env.R2_SECRET_ACCESS_KEY&&process.env.R2_BUCKET);
+const R2_BUCKET=process.env.R2_BUCKET||'';
+const R2_MAX_IMAGE=100*1024*1024;
+const R2_MAX_VIDEO=500*1024*1024;
+const R2_MAX_AUDIO=100*1024*1024;
+const r2=R2_ENABLED?new S3Client({region:'auto',endpoint:`https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,credentials:{accessKeyId:process.env.R2_ACCESS_KEY_ID,secretAccessKey:process.env.R2_SECRET_ACCESS_KEY}}):null;
+async function r2GetUrl(key){
+  if(!R2_ENABLED||!key)return '';
+  return getSignedUrl(r2,new GetObjectCommand({Bucket:R2_BUCKET,Key:key}),{expiresIn:86400});
+}
 const pool=new Pool({connectionString:process.env.DATABASE_URL,ssl:process.env.DATABASE_URL?{rejectUnauthorized:false}:false});
 
 const id=()=>crypto.randomUUID();
@@ -319,6 +331,23 @@ async function auth(req,res,next){
   }catch{res.status(401).json({error:'Требуется вход'});}
 }
 
+app.post('/api/media/upload-url',auth,async(req,res)=>{
+ try{
+  if(!R2_ENABLED)return res.status(503).json({error:'R2 не настроен'});
+  const type=String(req.body.type||''); const contentType=String(req.body.contentType||'application/octet-stream');
+  const size=Math.floor(Number(req.body.size||0));
+  const limits={image:R2_MAX_IMAGE,video:R2_MAX_VIDEO,audio:R2_MAX_AUDIO};
+  if(!limits[type])return res.status(400).json({error:'Неподдерживаемый тип файла'});
+  if(!Number.isFinite(size)||size<=0||size>limits[type])return res.status(413).json({error:'Файл слишком большой. Лимит: '+Math.round(limits[type]/1024/1024)+' МБ'});
+  if(type==='image'&&!contentType.startsWith('image/'))return res.status(400).json({error:'Некорректный тип фото'});
+  if(type==='video'&&!contentType.startsWith('video/'))return res.status(400).json({error:'Некорректный тип видео'});
+  if(type==='audio'&&!contentType.startsWith('audio/'))return res.status(400).json({error:'Некорректный тип аудио'});
+  const ext=(contentType.split('/')[1]||'bin').replace(/[^a-z0-9.+-]/gi,'').slice(0,12)||'bin';
+  const key='media/'+req.user.id+'/'+Date.now()+'-'+crypto.randomUUID()+'.'+ext;
+  const url=await getSignedUrl(r2,new PutObjectCommand({Bucket:R2_BUCKET,Key:key,ContentType:contentType}),{expiresIn:3600});
+  res.json({ok:true,key,url,maxBytes:limits[type]});
+ }catch(e){console.error('R2 upload-url error',e);res.status(500).json({error:'Не удалось подготовить загрузку'});}
+});
 app.get('/api/health',async(req,res)=>{
   try{await pool.query('SELECT 1');res.json({ok:true,app:'SpiderGram',version:'4.0',database:'postgresql'});}
   catch(e){res.status(503).json({ok:false,app:'SpiderGram',error:'Database unavailable'});}
@@ -680,7 +709,7 @@ app.get('/api/messages/:uid',auth,async(req,res)=>{
   const ids=r.rows.map(m=>m.id);
   let rx=[];
   if(ids.length){const q=await pool.query('SELECT message_id,user_id,emoji FROM reactions WHERE message_id=ANY($1)',[ids]);rx=q.rows;}
-  res.json(r.rows.reverse().map(m=>({id:m.id,from:m.from,to:m.to,text:m.deleted?'Сообщение удалено':m.text,type:m.deleted?'deleted':m.type,mediaUrl:m.deleted?'':m.media_url,createdAt:Number(m.created_at),edited:!!m.edited,deleted:!!m.deleted,read:m.from===req.user.id&&peerLastRead>=Number(m.created_at),reactions:rx.filter(x=>x.message_id===m.id).map(x=>({userId:x.user_id,emoji:x.emoji}))})));
+  const out=[];for(const m of r.rows.reverse()){let media=m.deleted?'':m.media_url;if(media?.startsWith('r2:'))media=await r2GetUrl(media.slice(3));out.push({id:m.id,from:m.from,to:m.to,text:m.deleted?'Сообщение удалено':m.text,type:m.deleted?'deleted':m.type,mediaUrl:media,createdAt:Number(m.created_at),edited:!!m.edited,deleted:!!m.deleted,read:m.from===req.user.id&&peerLastRead>=Number(m.created_at),reactions:rx.filter(x=>x.message_id===m.id).map(x=>({userId:x.user_id,emoji:x.emoji}))})}res.json(out);
 });
 
 app.post('/api/messages/:uid',auth,async(req,res)=>{
@@ -688,13 +717,14 @@ app.post('/api/messages/:uid',auth,async(req,res)=>{
   if(to===req.user.id)return res.status(400).json({error:'Нельзя отправить сообщение самому себе'});
   if(!await getUser(to))return res.status(404).json({error:'Пользователь не найден'});
   if(type==='text'){if(!text||text.length>4000)return res.status(400).json({error:'Сообщение пустое или длиннее 4000 символов'});}
-  else if(type==='image'){if(!mediaUrl.startsWith('data:image/'))return res.status(400).json({error:'Некорректное изображение'});if(mediaUrl.length>16800000)return res.status(413).json({error:'Фото слишком большое'});}
-  else if(type==='audio'){if(!mediaUrl.startsWith('data:audio/'))return res.status(400).json({error:'Некорректное аудио'});if(mediaUrl.length>7000000)return res.status(413).json({error:'Голосовое слишком большое'});}
+  else if(type==='image'){if(mediaUrl.startsWith('r2:')){}else if(!mediaUrl.startsWith('data:image/'))return res.status(400).json({error:'Некорректное изображение'});else if(mediaUrl.length>16800000)return res.status(413).json({error:'Фото слишком большое'});}
+  else if(type==='video'){if(!mediaUrl.startsWith('r2:'))return res.status(400).json({error:'Некорректное видео'});}
+  else if(type==='audio'){if(mediaUrl.startsWith('r2:')){}else if(!mediaUrl.startsWith('data:audio/'))return res.status(400).json({error:'Некорректное аудио'});else if(mediaUrl.length>7000000)return res.status(413).json({error:'Голосовое слишком большое'});}
   else return res.status(400).json({error:'Неизвестный тип сообщения'});
   await pool.query('DELETE FROM hidden_chats WHERE user_id=$1 AND peer_id=$2',[req.user.id,to]);
-  const sender=await getUser(req.user.id);const m={id:id(),from:req.user.id,to,text:type==='text'?text:'',type,mediaUrl:type==='text'?'':mediaUrl,createdAt:Date.now(),edited:false,deleted:false,reactions:[],sender:sender?{id:sender.id,name:sender.name,username:sender.username,avatar:sender.avatar}:null};
+  const sender=await getUser(req.user.id);const storedMedia=mediaUrl.startsWith('r2:')?mediaUrl:mediaUrl;const m={id:id(),from:req.user.id,to,text:type==='text'?text:'',type,mediaUrl:type==='text'?'':storedMedia,createdAt:Date.now(),edited:false,deleted:false,reactions:[],sender:sender?{id:sender.id,name:sender.name,username:sender.username,avatar:sender.avatar}:null};
   await pool.query('INSERT INTO messages(id,"from","to",text,type,media_url,created_at) VALUES($1,$2,$3,$4,$5,$6,$7)',[m.id,m.from,m.to,m.text,m.type,m.mediaUrl,m.createdAt]);
-  io.to(to).emit('message',m);
+  const socketMedia=m.mediaUrl?.startsWith('r2:')?await r2GetUrl(m.mediaUrl.slice(3)):m.mediaUrl;io.to(to).emit('message',{...m,mediaUrl:socketMedia});m.mediaUrl=socketMedia;
   const local=new Date();const activityEvent=type==='image'?'photo':type==='audio'?'voice':'message';const activityResult=await applyActivity(req.user.id,activityEvent,local.getFullYear()+"-"+String(local.getMonth()+1).padStart(2,"0")+"-"+String(local.getDate()).padStart(2,"0"),local.getHours());
   res.json({...m,...activityResult});
 });
@@ -715,7 +745,7 @@ app.patch('/api/messages/:id',auth,async(req,res)=>{
   if(!text||text.length>4000)return res.status(400).json({error:'Сообщение пустое или слишком длинное'});
   const r=await pool.query("UPDATE messages SET text=$1,edited=true WHERE id=$2 AND \"from\"=$3 AND type='text' AND deleted=false RETURNING id,\"from\",\"to\",text,type,media_url,created_at,edited,deleted",[text,req.params.id,req.user.id]);
   if(!r.rowCount)return res.status(404).json({error:'Сообщение не найдено или его нельзя изменить'});
-  const m=r.rows[0]; const out={id:m.id,from:m.from,to:m.to,text:m.text,type:m.type,mediaUrl:m.media_url,createdAt:Number(m.created_at),edited:true,deleted:false,reactions:[]};
+  const m=r.rows[0]; const out={id:m.id,from:m.from,to:m.to,text:m.text,type:m.type,mediaUrl:m.media_url?.startsWith('r2:')?await r2GetUrl(m.media_url.slice(3)):m.media_url,createdAt:Number(m.created_at),edited:true,deleted:false,reactions:[]};
   io.to(m.to).emit('message:update',out); io.to(m.from).emit('message:update',out); res.json(out);
 });
 app.delete('/api/messages/:id',auth,async(req,res)=>{
