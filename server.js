@@ -22,8 +22,8 @@ const SECRET=process.env.JWT_SECRET||'CHANGE_THIS_SPIDERGRAM_SECRET_2026';
 const PORT=Number(process.env.PORT||3000);
 const R2_ENABLED=!!(process.env.R2_ACCOUNT_ID&&process.env.R2_ACCESS_KEY_ID&&process.env.R2_SECRET_ACCESS_KEY&&process.env.R2_BUCKET);
 const R2_BUCKET=process.env.R2_BUCKET||'';
-const R2_MAX_IMAGE=100*1024*1024;
-const R2_MAX_VIDEO=500*1024*1024;
+const R2_MAX_IMAGE=12*1024*1024;
+const R2_MAX_VIDEO=12*1024*1024;
 const R2_MAX_AUDIO=10*1024*1024;
 // Защитный режим: не позволяем медиа приблизиться к бесплатному лимиту R2.
 const R2_SAFE_STORAGE_BYTES=8*1024*1024*1024;
