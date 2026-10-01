@@ -786,19 +786,20 @@ app.get('/api/groups/:id/messages',auth,async(req,res)=>{
  const ok=await pool.query('SELECT 1 FROM group_members WHERE group_id=$1 AND user_id=$2',[req.params.id,req.user.id]);
  if(!ok.rowCount)return res.status(403).json({error:'Нет доступа'});
  const r=await pool.query('SELECT id,"from",text,type,media_url,created_at,edited,deleted FROM group_messages WHERE group_id=$1 ORDER BY created_at DESC LIMIT 300',[req.params.id]);
- res.json(r.rows.reverse().map(m=>({id:m.id,from:m.from,text:m.deleted?'Сообщение удалено':m.text,type:m.deleted?'deleted':m.type,mediaUrl:m.deleted?'':m.media_url,createdAt:Number(m.created_at),edited:!!m.edited,deleted:!!m.deleted})));
+ const out=[];for(const m of r.rows.reverse()){let media=m.deleted?'':m.media_url;if(media?.startsWith('r2:'))media=await r2GetUrl(media.slice(3));out.push({id:m.id,from:m.from,text:m.deleted?'Сообщение удалено':m.text,type:m.deleted?'deleted':m.type,mediaUrl:media,createdAt:Number(m.created_at),edited:!!m.edited,deleted:!!m.deleted})}res.json(out);
 });
 app.post('/api/groups/:id/messages',auth,async(req,res)=>{
  const ok=await pool.query('SELECT 1 FROM group_members WHERE group_id=$1 AND user_id=$2',[req.params.id,req.user.id]);
  if(!ok.rowCount)return res.status(403).json({error:'Нет доступа'});
  const type=String(req.body.type||'text'),text=String(req.body.text||'').trim(),mediaUrl=String(req.body.mediaUrl||'');
  if(type==='text'&&(!text||text.length>4000))return res.status(400).json({error:'Сообщение пустое или слишком длинное'});
- if(type==='image'&&!mediaUrl.startsWith('data:image/'))return res.status(400).json({error:'Некорректное изображение'});if(type==='image'&&mediaUrl.length>16800000)return res.status(413).json({error:'Фото слишком большое'});
- if(type==='audio'&&!mediaUrl.startsWith('data:audio/'))return res.status(400).json({error:'Некорректное аудио'});
+ if(type==='image'&&!(mediaUrl.startsWith('r2:')||mediaUrl.startsWith('data:image/')))return res.status(400).json({error:'Некорректное изображение'});if(type==='image'&&mediaUrl.startsWith('data:')&&mediaUrl.length>16800000)return res.status(413).json({error:'Фото слишком большое'});
+ if(type==='video'&&!mediaUrl.startsWith('r2:'))return res.status(400).json({error:'Видео загружается только через R2'});
+ if(type==='audio'&&!(mediaUrl.startsWith('r2:')||mediaUrl.startsWith('data:audio/')))return res.status(400).json({error:'Некорректное аудио'});
  const m={id:id(),groupId:req.params.id,from:req.user.id,text:type==='text'?text:'',type,mediaUrl:type==='text'?'':mediaUrl,createdAt:Date.now(),edited:false,deleted:false};
  await pool.query('INSERT INTO group_messages(id,group_id,"from",text,type,media_url,created_at) VALUES($1,$2,$3,$4,$5,$6,$7)',[m.id,m.groupId,m.from,m.text,m.type,m.mediaUrl,m.createdAt]);
  const ms=await pool.query('SELECT user_id FROM group_members WHERE group_id=$1',[m.groupId]);
- ms.rows.forEach(x=>io.to(x.user_id).emit('group:message',m));res.json(m);
+ for(const x of ms.rows)io.to(x.user_id).emit('group:message',{...m,mediaUrl:m.mediaUrl?.startsWith('r2:')?await r2GetUrl(m.mediaUrl.slice(3)):m.mediaUrl});res.json({...m,mediaUrl:m.mediaUrl?.startsWith('r2:')?await r2GetUrl(m.mediaUrl.slice(3)):m.mediaUrl});
 });
 app.get('/api/messages/search',auth,async(req,res)=>{
  const q=String(req.query.q||'').trim();if(q.length<2)return res.json([]);
