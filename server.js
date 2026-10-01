@@ -667,10 +667,12 @@ app.get('/api/messages/:uid',auth,async(req,res)=>{
   const other=await getUser(req.params.uid);
   if(!other)return res.status(404).json({error:'Пользователь не найден'});
   const r=await pool.query(`SELECT id,"from","to",text,type,media_url,created_at,edited,deleted FROM messages WHERE ("from"=$1 AND "to"=$2) OR ("from"=$2 AND "to"=$1) ORDER BY created_at DESC LIMIT 300`,[req.user.id,req.params.uid]);
+  const peerRead=await pool.query('SELECT last_read_at FROM conversation_reads WHERE user_id=$1 AND peer_id=$2',[req.params.uid,req.user.id]);
+  const peerLastRead=Number(peerRead.rows[0]?.last_read_at||0);
   const ids=r.rows.map(m=>m.id);
   let rx=[];
   if(ids.length){const q=await pool.query('SELECT message_id,user_id,emoji FROM reactions WHERE message_id=ANY($1)',[ids]);rx=q.rows;}
-  res.json(r.rows.reverse().map(m=>({id:m.id,from:m.from,to:m.to,text:m.deleted?'Сообщение удалено':m.text,type:m.deleted?'deleted':m.type,mediaUrl:m.deleted?'':m.media_url,createdAt:Number(m.created_at),edited:!!m.edited,deleted:!!m.deleted,reactions:rx.filter(x=>x.message_id===m.id).map(x=>({userId:x.user_id,emoji:x.emoji}))})));
+  res.json(r.rows.reverse().map(m=>({id:m.id,from:m.from,to:m.to,text:m.deleted?'Сообщение удалено':m.text,type:m.deleted?'deleted':m.type,mediaUrl:m.deleted?'':m.media_url,createdAt:Number(m.created_at),edited:!!m.edited,deleted:!!m.deleted,read:m.from===req.user.id&&peerLastRead>=Number(m.created_at),reactions:rx.filter(x=>x.message_id===m.id).map(x=>({userId:x.user_id,emoji:x.emoji}))})));
 });
 
 app.post('/api/messages/:uid',auth,async(req,res)=>{
@@ -769,7 +771,9 @@ app.get('/api/messages/search',auth,async(req,res)=>{
 });
 app.post('/api/messages/:uid/read',auth,async(req,res)=>{
  const now=Date.now();await pool.query(`INSERT INTO conversation_reads(user_id,peer_id,last_read_at) VALUES($1,$2,$3)
- ON CONFLICT(user_id,peer_id) DO UPDATE SET last_read_at=EXCLUDED.last_read_at`,[req.user.id,req.params.uid,now]);res.json({ok:true});
+ ON CONFLICT(user_id,peer_id) DO UPDATE SET last_read_at=EXCLUDED.last_read_at`,[req.user.id,req.params.uid,now]);
+ io.to(req.params.uid).emit('read',{from:req.user.id,readAt:now});
+ res.json({ok:true,readAt:now});
 });
 io.use((socket,next)=>{try{socket.user=jwt.verify(socket.handshake.auth?.token||'',SECRET);next();}catch{next(new Error('Unauthorized'));}});
 io.on('connection',async socket=>{
