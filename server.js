@@ -202,6 +202,20 @@ async function initDb(){
       created_at BIGINT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS push_subscriptions_user_idx ON push_subscriptions(user_id);
+    CREATE TABLE IF NOT EXISTS promo_codes(
+      code TEXT PRIMARY KEY,
+      reward_sp INTEGER NOT NULL DEFAULT 0,
+      reward_title TEXT NOT NULL DEFAULT '',
+      max_uses INTEGER NOT NULL DEFAULT 0,
+      uses INTEGER NOT NULL DEFAULT 0,
+      created_at BIGINT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS promo_redemptions(
+      code TEXT NOT NULL REFERENCES promo_codes(code) ON DELETE CASCADE,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      redeemed_at BIGINT NOT NULL,
+      PRIMARY KEY(code,user_id)
+    );
     CREATE TABLE IF NOT EXISTS call_notifications(
       id TEXT PRIMARY KEY,
       to_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -420,6 +434,29 @@ app.get('/api/rewards',auth,async(req,res)=>{
 function isOwnerAdmin(u){return String(u?.username||'').toLowerCase()==='dobry'}
 async function requireOwnerAdmin(req,res){const u=await getUser(req.user.id);if(!isOwnerAdmin(u)){res.status(403).json({error:'Доступ только для @dobry'});return null}return u}
 app.get('/api/admin/users',auth,async(req,res)=>{const admin=await requireOwnerAdmin(req,res);if(!admin)return;const q=String(req.query.q||'').trim().toLowerCase();const r=await pool.query("SELECT * FROM users WHERE ($1='' OR username ILIKE '%'||$1||'%' OR name ILIKE '%'||$1||'%') ORDER BY username LIMIT 50",[q]);res.json(r.rows.map(x=>({...publicUser(x),currency:Number(x.currency||0)})))});
+app.post('/api/promo/redeem',auth,async(req,res)=>{
+ const code=String(req.body.code||'').trim().toUpperCase();
+ if(!code)return res.status(400).json({error:'Введите промокод'});
+ const c=await pool.query('SELECT * FROM promo_codes WHERE code=$1',[code]);
+ if(!c.rowCount)return res.status(404).json({error:'Промокод не найден'});
+ const promo=c.rows[0];
+ if(Number(promo.max_uses)>0&&Number(promo.uses)>=Number(promo.max_uses))return res.status(400).json({error:'Лимит использований промокода исчерпан'});
+ const used=await pool.query('SELECT 1 FROM promo_redemptions WHERE code=$1 AND user_id=$2',[code,req.user.id]);
+ if(used.rowCount)return res.status(400).json({error:'Ты уже использовал этот промокод'});
+ await pool.query('BEGIN');
+ try{
+   await pool.query('INSERT INTO promo_redemptions(code,user_id,redeemed_at) VALUES($1,$2,$3)',[code,req.user.id,Date.now()]);
+   await pool.query('UPDATE promo_codes SET uses=uses+1 WHERE code=$1',[code]);
+   if(Number(promo.reward_sp)>0)await pool.query('UPDATE users SET currency=currency+$1 WHERE id=$2',[Number(promo.reward_sp),req.user.id]);
+   if(promo.reward_title){
+     const u=await getUser(req.user.id); let awards=parseJson(u.title_awards,[]);
+     awards=Array.from(new Set([...awards,promo.reward_title]));
+     await pool.query('UPDATE users SET title_awards=$1 WHERE id=$2',[JSON.stringify(awards),req.user.id]);
+   }
+   await pool.query('COMMIT');
+   res.json({ok:true,sp:Number(promo.reward_sp||0),title:promo.reward_title||''});
+ }catch(e){await pool.query('ROLLBACK');throw e}
+});
 app.patch('/api/admin/users/:id/custom-color',auth,async(req,res)=>{const admin=await requireOwnerAdmin(req,res);if(!admin)return;const target=await getUser(req.params.id);if(!target)return res.status(404).json({error:'Пользователь не найден'});const enabled=req.body.enabled!==false;const r=await pool.query('UPDATE users SET custom_color_enabled=$1 WHERE id=$2 RETURNING *',[enabled,target.id]);res.json(publicUser(r.rows[0]));});
 app.patch('/api/admin/users/:id/currency',auth,async(req,res)=>{const admin=await requireOwnerAdmin(req,res);if(!admin)return;const target=await getUser(req.params.id);if(!target)return res.status(404).json({error:'Пользователь не найден'});const amount=Math.floor(Number(req.body.amount));if(!Number.isFinite(amount)||amount<=0||amount>1000000)return res.status(400).json({error:'Введите сумму от 1 до 1 000 000 SP'});const r=await pool.query('UPDATE users SET currency=currency+$1 WHERE id=$2 RETURNING currency',[amount,target.id]);res.json({ok:true,currency:Number(r.rows[0].currency||0)});});
 app.get('/api/push/public-key',auth,async(req,res)=>{
@@ -471,11 +508,14 @@ app.get('/api/notifications',auth,async(req,res)=>{
   await pool.query('UPDATE call_notifications SET read=true WHERE to_user_id=$1 AND read=false',[req.user.id]);
   res.json(r.rows.map(x=>({id:x.id,type:'call',from:{id:x.from_id,username:x.username,name:x.name,avatar:x.avatar||''},createdAt:Number(x.created_at)})));
 });
-app.patch('/api/admin/users/:id/title',auth,async(req,res)=>{const admin=await requireOwnerAdmin(req,res);if(!admin)return;const target=await getUser(req.params.id);if(!target)return res.status(404).json({error:'Пользователь не найден'});const title=String(req.body.title||'').trim().slice(0,50);const selectedTitle=String(req.body.selectedTitle||'').trim().slice(0,60);if(selectedTitle){const reward=rewardForDays(356).find(x=>x.type==='title'&&x.name===selectedTitle);if(!reward)return res.status(400).json({error:'Такого титула за достижение нет'});let awards=[];try{awards=JSON.parse(target.title_awards||'[]')}catch{}awards=Array.from(new Set([...awards,selectedTitle]));await pool.query('UPDATE users SET selected_title=$1,custom_title=$2,title_awards=$3 WHERE id=$4',[selectedTitle,'',JSON.stringify(awards),target.id]);}else{await pool.query('UPDATE users SET selected_title=$1,custom_title=$2 WHERE id=$3',['',title,target.id]);}res.json(publicUser(await getUser(target.id)))});
+app.patch('/api/admin/users/:id/title',auth,async(req,res)=>{const admin=await requireOwnerAdmin(req,res);if(!admin)return;const target=await getUser(req.params.id);if(!target)return res.status(404).json({error:'Пользователь не найден'});const title=String(req.body.title||'').trim().slice(0,50);const selectedTitle=String(req.body.selectedTitle||'').trim().slice(0,60);if(selectedTitle){const reward=rewardForDays(356).find(x=>x.type==='title'&&x.name===selectedTitle);if(!reward)return res.status(400).json({error:'Такого титула за достижение нет'});let awards=[];try{awards=JSON.parse(target.title_awards||'[]')}catch{}awards=Array.from(new Set([...awards,selectedTitle]));await pool.query('UPDATE users SET selected_title=$1,custom_title=$2,title_awards=$3 WHERE id=$4',[selectedTitle,'',JSON.stringify(awards),target.id]);}else{let awards=[];try{awards=JSON.parse(target.title_awards||'[]')}catch{}if(title){awards=Array.from(new Set([...awards,title]));await pool.query('UPDATE users SET selected_title=$1,custom_title=$2,title_awards=$3 WHERE id=$4',[title,'',JSON.stringify(awards),target.id]);}else{await pool.query('UPDATE users SET selected_title=$1,custom_title=$2 WHERE id=$3',['','',target.id]);}}res.json(publicUser(await getUser(target.id)))});
 app.delete('/api/admin/users/:id/title',auth,async(req,res)=>{const admin=await requireOwnerAdmin(req,res);if(!admin)return;const target=await getUser(req.params.id);if(!target)return res.status(404).json({error:'Пользователь не найден'});let awards=[];try{awards=JSON.parse(target.title_awards||'[]')}catch{}if(target.selected_title)awards=awards.filter(x=>x!==target.selected_title);await pool.query('UPDATE users SET selected_title=$1,custom_title=$2,title_awards=$3 WHERE id=$4',['','',JSON.stringify(awards),target.id]);res.json(publicUser(await getUser(target.id)))});
 
 app.patch('/api/admin/users/:id/titles/all',auth,async(req,res)=>{const admin=await requireOwnerAdmin(req,res);if(!admin)return;const target=await getUser(req.params.id);if(!target)return res.status(404).json({error:'Пользователь не найден'});const all=rewardForDays(356).filter(x=>x.type==='title').map(x=>x.name);let awards=[];try{awards=JSON.parse(target.title_awards||'[]')}catch{}awards=Array.from(new Set([...awards,...all]));await pool.query('UPDATE users SET title_awards=$1 WHERE id=$2',[JSON.stringify(awards),target.id]);res.json(publicUser(await getUser(target.id)))});
 app.delete('/api/admin/users/:id/titles/all',auth,async(req,res)=>{const admin=await requireOwnerAdmin(req,res);if(!admin)return;const target=await getUser(req.params.id);if(!target)return res.status(404).json({error:'Пользователь не найден'});await pool.query('UPDATE users SET selected_title=$1,custom_title=$2,title_awards=$3 WHERE id=$4',['','',JSON.stringify([]),target.id]);res.json(publicUser(await getUser(target.id)))});app.patch('/api/admin/users/:id/check',auth,async(req,res)=>{const admin=await requireOwnerAdmin(req,res);if(!admin)return;const target=await getUser(req.params.id);if(!target)return res.status(404).json({error:'Пользователь не найден'});const enabled=req.body.enabled!==false;await pool.query('UPDATE users SET admin_check=$1 WHERE id=$2',[enabled,target.id]);res.json(publicUser(await getUser(target.id)))});
+app.get('/api/admin/promos',auth,async(req,res)=>{const admin=await requireOwnerAdmin(req,res);if(!admin)return;const r=await pool.query('SELECT code,reward_sp,reward_title,max_uses,uses,created_at FROM promo_codes ORDER BY created_at DESC');res.json(r.rows.map(x=>({...x,rewardSp:Number(x.reward_sp),maxUses:Number(x.max_uses),uses:Number(x.uses)})))});
+app.post('/api/admin/promos',auth,async(req,res)=>{const admin=await requireOwnerAdmin(req,res);if(!admin)return;const code=String(req.body.code||'').trim().toUpperCase().replace(/[^A-Z0-9_-]/g,'').slice(0,40);const rewardSp=Math.floor(Number(req.body.rewardSp||0));const rewardTitle=String(req.body.rewardTitle||'').trim().slice(0,60);const maxUses=Math.floor(Number(req.body.maxUses||0));if(!code)return res.status(400).json({error:'Введите код'});if(rewardSp<0||rewardSp>1000000)return res.status(400).json({error:'SP: от 0 до 1 000 000'});if(!rewardSp&&!rewardTitle)return res.status(400).json({error:'Укажите награду'});if(maxUses<0||maxUses>1000000)return res.status(400).json({error:'Лимит: от 0 до 1 000 000'});try{await pool.query('INSERT INTO promo_codes(code,reward_sp,reward_title,max_uses,uses,created_at) VALUES($1,$2,$3,$4,0,$5)',[code,rewardSp,rewardTitle,maxUses,Date.now()]);res.json({ok:true})}catch(e){if(e.code==='23505')return res.status(400).json({error:'Такой промокод уже существует'});throw e}});
+app.delete('/api/admin/promos/:code',auth,async(req,res)=>{const admin=await requireOwnerAdmin(req,res);if(!admin)return;await pool.query('DELETE FROM promo_codes WHERE code=$1',[String(req.params.code||'').toUpperCase()]);res.json({ok:true})});
 app.get('/api/stats',auth,async(req,res)=>{try{const [u,m,g,o]=await Promise.all([pool.query('SELECT COUNT(*)::int count FROM users'),pool.query('SELECT COUNT(*)::int count FROM messages'),pool.query('SELECT COUNT(*)::int count FROM groups'),pool.query('SELECT COUNT(*)::int count FROM users WHERE online=true')]);res.json({users:u.rows[0].count,messages:m.rows[0].count,groups:g.rows[0].count,online:o.rows[0].count})}catch(e){res.status(500).json({error:'Не удалось загрузить статистику'})}});
 app.get('/api/users',auth,async(req,res)=>{
   const q=String(req.query.q||'').trim().toLowerCase();
