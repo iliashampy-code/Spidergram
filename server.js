@@ -13,7 +13,7 @@ const app=express();
 const server=http.createServer(app);
 const io=new Server(server,{cors:{origin:true,credentials:true}});
 app.use(cors({origin:true,credentials:true}));
-app.use(express.json({limit:'10mb'}));
+app.use(express.json({limit:'20mb'}));
 
 const ROOT=__dirname;
 const SECRET=process.env.JWT_SECRET||'CHANGE_THIS_SPIDERGRAM_SECRET_2026';
@@ -688,7 +688,7 @@ app.post('/api/messages/:uid',auth,async(req,res)=>{
   if(to===req.user.id)return res.status(400).json({error:'Нельзя отправить сообщение самому себе'});
   if(!await getUser(to))return res.status(404).json({error:'Пользователь не найден'});
   if(type==='text'){if(!text||text.length>4000)return res.status(400).json({error:'Сообщение пустое или длиннее 4000 символов'});}
-  else if(type==='image'){if(!mediaUrl.startsWith('data:image/'))return res.status(400).json({error:'Некорректное изображение'});if(mediaUrl.length>5600000)return res.status(413).json({error:'Фото слишком большое'});}
+  else if(type==='image'){if(!mediaUrl.startsWith('data:image/'))return res.status(400).json({error:'Некорректное изображение'});if(mediaUrl.length>16800000)return res.status(413).json({error:'Фото слишком большое'});}
   else if(type==='audio'){if(!mediaUrl.startsWith('data:audio/'))return res.status(400).json({error:'Некорректное аудио'});if(mediaUrl.length>7000000)return res.status(413).json({error:'Голосовое слишком большое'});}
   else return res.status(400).json({error:'Неизвестный тип сообщения'});
   await pool.query('DELETE FROM hidden_chats WHERE user_id=$1 AND peer_id=$2',[req.user.id,to]);
@@ -763,7 +763,7 @@ app.post('/api/groups/:id/messages',auth,async(req,res)=>{
  if(!ok.rowCount)return res.status(403).json({error:'Нет доступа'});
  const type=String(req.body.type||'text'),text=String(req.body.text||'').trim(),mediaUrl=String(req.body.mediaUrl||'');
  if(type==='text'&&(!text||text.length>4000))return res.status(400).json({error:'Сообщение пустое или слишком длинное'});
- if(type==='image'&&!mediaUrl.startsWith('data:image/'))return res.status(400).json({error:'Некорректное изображение'});
+ if(type==='image'&&!mediaUrl.startsWith('data:image/'))return res.status(400).json({error:'Некорректное изображение'});if(type==='image'&&mediaUrl.length>16800000)return res.status(413).json({error:'Фото слишком большое'});
  if(type==='audio'&&!mediaUrl.startsWith('data:audio/'))return res.status(400).json({error:'Некорректное аудио'});
  const m={id:id(),groupId:req.params.id,from:req.user.id,text:type==='text'?text:'',type,mediaUrl:type==='text'?'':mediaUrl,createdAt:Date.now(),edited:false,deleted:false};
  await pool.query('INSERT INTO group_messages(id,group_id,"from",text,type,media_url,created_at) VALUES($1,$2,$3,$4,$5,$6,$7)',[m.id,m.groupId,m.from,m.text,m.type,m.mediaUrl,m.createdAt]);
