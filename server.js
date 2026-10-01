@@ -722,12 +722,12 @@ app.post('/api/messages/:uid',auth,async(req,res)=>{
   if(!await getUser(to))return res.status(404).json({error:'Пользователь не найден'});
   if(type==='text'){if(!text||text.length>4000)return res.status(400).json({error:'Сообщение пустое или длиннее 4000 символов'});}
   else if(type==='image'||type==='video'){const prefix=type==='image'?'data:image/':'data:video/';if(!mediaUrl.startsWith(prefix))return res.status(400).json({error:type==='image'?'Некорректное изображение':'Некорректное видео'});if(mediaUrl.length>16800000)return res.status(413).json({error:(type==='image'?'Фото':'Видео')+' слишком большое. Лимит: 12 МБ'});}
-  else if(type==='audio'){if(mediaUrl.startsWith('r2:')){}else if(!mediaUrl.startsWith('data:audio/'))return res.status(400).json({error:'Некорректное аудио'});else if(mediaUrl.length>7000000)return res.status(413).json({error:'Голосовое слишком большое'});}
+  else if(type==='audio'){if(!mediaUrl.startsWith('data:audio/'))return res.status(400).json({error:'Некорректное аудио'});else if(mediaUrl.length>7000000)return res.status(413).json({error:'Голосовое слишком большое'});}
   else return res.status(400).json({error:'Неизвестный тип сообщения'});
   await pool.query('DELETE FROM hidden_chats WHERE user_id=$1 AND peer_id=$2',[req.user.id,to]);
-  const sender=await getUser(req.user.id);const storedMedia=mediaUrl.startsWith('r2:')?mediaUrl:mediaUrl;const m={id:id(),from:req.user.id,to,text:type==='text'?text:'',type,mediaUrl:type==='text'?'':storedMedia,createdAt:Date.now(),edited:false,deleted:false,reactions:[],sender:sender?{id:sender.id,name:sender.name,username:sender.username,avatar:sender.avatar}:null};
+  const sender=await getUser(req.user.id);const storedMedia=mediaUrl;const m={id:id(),from:req.user.id,to,text:type==='text'?text:'',type,mediaUrl:type==='text'?'':storedMedia,createdAt:Date.now(),edited:false,deleted:false,reactions:[],sender:sender?{id:sender.id,name:sender.name,username:sender.username,avatar:sender.avatar}:null};
   await pool.query('INSERT INTO messages(id,"from","to",text,type,media_url,created_at) VALUES($1,$2,$3,$4,$5,$6,$7)',[m.id,m.from,m.to,m.text,m.type,m.mediaUrl,m.createdAt]);
-  const socketMedia=m.mediaUrl?.startsWith('r2:')?await r2GetUrl(m.mediaUrl.slice(3)):m.mediaUrl;io.to(to).emit('message',{...m,mediaUrl:socketMedia});m.mediaUrl=socketMedia;
+  const socketMedia=m.mediaUrl;io.to(to).emit('message',{...m,mediaUrl:socketMedia});m.mediaUrl=socketMedia;
   const local=new Date();const activityEvent=type==='image'?'photo':type==='audio'?'voice':'message';const activityResult=await applyActivity(req.user.id,activityEvent,local.getFullYear()+"-"+String(local.getMonth()+1).padStart(2,"0")+"-"+String(local.getDate()).padStart(2,"0"),local.getHours(),{peerId:to});
   res.json({...m,...activityResult});
 });
@@ -796,13 +796,12 @@ app.post('/api/groups/:id/messages',auth,async(req,res)=>{
  if(!ok.rowCount)return res.status(403).json({error:'Нет доступа'});
  const type=String(req.body.type||'text'),text=String(req.body.text||'').trim(),mediaUrl=String(req.body.mediaUrl||'');
  if(type==='text'&&(!text||text.length>4000))return res.status(400).json({error:'Сообщение пустое или слишком длинное'});
- if(type==='image'&&!(mediaUrl.startsWith('r2:')||mediaUrl.startsWith('data:image/')))return res.status(400).json({error:'Некорректное изображение'});if(type==='image'&&mediaUrl.startsWith('data:')&&mediaUrl.length>16800000)return res.status(413).json({error:'Фото слишком большое'});
- if(type==='video'&&!mediaUrl.startsWith('r2:'))return res.status(400).json({error:'Видео загружается только через R2'});
- if(type==='audio'&&!(mediaUrl.startsWith('r2:')||mediaUrl.startsWith('data:audio/')))return res.status(400).json({error:'Некорректное аудио'});
+ if(type==='image'||type==='video'){const prefix=type==='image'?'data:image/':'data:video/';if(!mediaUrl.startsWith(prefix))return res.status(400).json({error:type==='image'?'Некорректное изображение':'Некорректное видео'});if(mediaUrl.length>16800000)return res.status(413).json({error:(type==='image'?'Фото':'Видео')+' слишком большое. Лимит: 12 МБ'});}
+ if(type==='audio'&&!mediaUrl.startsWith('data:audio/'))return res.status(400).json({error:'Некорректное аудио'});
  const m={id:id(),groupId:req.params.id,from:req.user.id,text:type==='text'?text:'',type,mediaUrl:type==='text'?'':mediaUrl,createdAt:Date.now(),edited:false,deleted:false};
  await pool.query('INSERT INTO group_messages(id,group_id,"from",text,type,media_url,created_at) VALUES($1,$2,$3,$4,$5,$6,$7)',[m.id,m.groupId,m.from,m.text,m.type,m.mediaUrl,m.createdAt]);
  const ms=await pool.query('SELECT user_id FROM group_members WHERE group_id=$1',[m.groupId]);
- for(const x of ms.rows)io.to(x.user_id).emit('group:message',{...m,mediaUrl:m.mediaUrl?.startsWith('r2:')?await r2GetUrl(m.mediaUrl.slice(3)):m.mediaUrl});res.json({...m,mediaUrl:m.mediaUrl?.startsWith('r2:')?await r2GetUrl(m.mediaUrl.slice(3)):m.mediaUrl});
+ for(const x of ms.rows)io.to(x.user_id).emit('group:message',{...m,mediaUrl:m.mediaUrl});res.json({...m,mediaUrl:m.mediaUrl});
 });
 app.get('/api/messages/search',auth,async(req,res)=>{
  const q=String(req.query.q||'').trim();if(q.length<2)return res.json([]);
