@@ -68,7 +68,6 @@ const shopItems=[
  
  {id:'bg_sunset',type:'background',name:'Закат',price:110,value:'sunset',description:'Тёплый особый фон сообщений'},
  {id:'bg_ocean',type:'background',name:'Глубокий океан',price:120,value:'ocean',description:'Сине-голубой особый фон сообщений'},
- {id:'bg_matrix',type:'background',name:'Matrix',price:140,value:'matrix',description:'Зелёный цифровой фон сообщений'},
  {id:'bg_neon',type:'animated_background',name:'Neon Flow',price:260,value:'neon',description:'Анимированный неоновый фон'},
  {id:'bg_rain',type:'animated_background',name:'Cyber Rain',price:280,value:'rain',description:'Анимированный дождь'},
  {id:'bg_sunset_anim',type:'animated_background',name:'Живой закат',price:290,value:'sunset_anim',description:'Плавный анимированный закат'},
