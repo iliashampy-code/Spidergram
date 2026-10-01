@@ -47,7 +47,6 @@ const taskTitleRewards=[
 ];
 const taskTitleNames=taskTitleRewards.map(x=>x.name);
 const shopItems=[
- {id:'color_cyan',type:'color',name:'Неоновый голубой',price:60,value:'#00d9ff',description:'Цвет интерфейса'},
  {id:'color_slate',type:'color',name:'Тёмно-серый',price:65,value:'#64748b',description:'Сдержанный тёмно-серый цвет интерфейса'},
  {id:'color_graphite',type:'color',name:'Графитовый',price:70,value:'#7c8796',description:'Контрастный графитовый цвет интерфейса'},
  {id:'color_red',type:'color',name:'Красный',price:70,value:'#ef4444',description:'Яркий красный цвет интерфейса'},
