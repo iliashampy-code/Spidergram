@@ -54,6 +54,12 @@ class MainActivity : AppCompatActivity() {
         CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true)
 
         webView.webViewClient = object : WebViewClient() {
+            override fun onRenderProcessGone(view: WebView, detail: android.webkit.RenderProcessGoneDetail): Boolean {
+                Toast.makeText(this@MainActivity, "SpiderGram перезапускает страницу…", Toast.LENGTH_SHORT).show()
+                view.post { view.loadUrl(SITE_URL) }
+                return true
+            }
+
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                 val url = request.url.toString()
                 return if (url.startsWith("http://") || url.startsWith("https://")) {
@@ -99,11 +105,8 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        if (::webView.isInitialized) {
-            // Always revalidate the live site when the app becomes active.
-            // The APK is only a shell: website updates do not require an APK rebuild.
-            webView.reload()
-        }
+        // Do not force a reload here: Android can call onResume after permission/file dialogs.
+        // The live site is loaded on launch, so website updates are still picked up next time the app opens.
     }
 
     override fun onBackPressed() {
