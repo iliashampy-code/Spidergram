@@ -719,27 +719,33 @@ async function pollForMessage(messageId, pollRaw, viewerId){
  }catch{return null}
 }
 app.get('/api/polls/:id',auth,async(req,res)=>{
- const r=await pool.query('SELECT id,"from",to,text,type,created_at FROM messages WHERE id=$1',[req.params.id]);
- if(!r.rowCount||r.rows[0].type!=='poll')return res.status(404).json({error:'Опрос не найден'});
- const m=r.rows[0], p=await pollForMessage(m.id,m.text,req.user.id);
- if(!p)return res.status(400).json({error:'Некорректный опрос'});
- if(m.from!==req.user.id&&m.to!==req.user.id)return res.status(403).json({error:'Нет доступа'});
- res.json(p);
-});
-app.post('/api/messages/:id/poll-vote',auth,async(req,res)=>{
- const r=await pool.query('SELECT id,"from",to,text,type,created_at FROM messages WHERE id=$1',[req.params.id]);
+ let r=await pool.query('SELECT id,"from",to,text,type,created_at FROM messages WHERE id=$1',[req.params.id]);
+ let isGroup=false, groupId='';
+ if(!r.rowCount){r=await pool.query('SELECT id,group_id,"from",text,type,created_at FROM group_messages WHERE id=$1',[req.params.id]);isGroup=!!r.rowCount;groupId=r.rows[0]?.group_id||'';}
  if(!r.rowCount||r.rows[0].type!=='poll')return res.status(404).json({error:'Опрос не найден'});
  const m=r.rows[0];
- if(m.from!==req.user.id&&m.to!==req.user.id)return res.status(403).json({error:'Нет доступа'});
+ if(isGroup){const ok=await pool.query('SELECT 1 FROM group_members WHERE group_id=$1 AND user_id=$2',[groupId,req.user.id]);if(!ok.rowCount)return res.status(403).json({error:'Нет доступа'});}
+ else if(m.from!==req.user.id&&m.to!==req.user.id)return res.status(403).json({error:'Нет доступа'});
+ const p=await pollForMessage(m.id,m.text,req.user.id);
+ if(!p)return res.status(400).json({error:'Некорректный опрос'});
+ res.json(p);
+});
+app.post('/api/polls/:id/vote',auth,async(req,res)=>{
+ let r=await pool.query('SELECT id,"from",to,text,type FROM messages WHERE id=$1',[req.params.id]);
+ let isGroup=false,groupId='';
+ if(!r.rowCount){r=await pool.query('SELECT id,group_id,"from",text,type FROM group_messages WHERE id=$1',[req.params.id]);isGroup=!!r.rowCount;groupId=r.rows[0]?.group_id||'';}
+ if(!r.rowCount||r.rows[0].type!=='poll')return res.status(404).json({error:'Опрос не найден'});
+ const m=r.rows[0];
+ if(isGroup){const ok=await pool.query('SELECT 1 FROM group_members WHERE group_id=$1 AND user_id=$2',[groupId,req.user.id]);if(!ok.rowCount)return res.status(403).json({error:'Нет доступа'});}
+ else if(m.from!==req.user.id&&m.to!==req.user.id)return res.status(403).json({error:'Нет доступа'});
  let p;try{p=JSON.parse(m.text)}catch{return res.status(400).json({error:'Некорректный опрос'})}
- const now=Date.now();
- if(p.endsAt&&now>=Number(p.endsAt))return res.status(400).json({error:'Опрос уже завершён'});
+ if(p.endsAt&&Date.now()>=Number(p.endsAt))return res.status(400).json({error:'Опрос уже завершён'});
  let selected=Array.isArray(req.body.optionIndexes)?req.body.optionIndexes.map(Number):[Number(req.body.optionIndex)];
  selected=[...new Set(selected.filter(x=>Number.isInteger(x)&&x>=0&&x<p.options.length))];
  if(!selected.length)return res.status(400).json({error:'Выбери вариант'});
  if(p.multiple!==true&&selected.length>1)selected=selected.slice(0,1);
  await pool.query('DELETE FROM poll_votes WHERE message_id=$1 AND user_id=$2',[m.id,req.user.id]);
- for(const oi of selected)await pool.query('INSERT INTO poll_votes(message_id,user_id,option_index,voted_at) VALUES($1,$2,$3,$4)',[m.id,req.user.id,oi,now]);
+ for(const oi of selected)await pool.query('INSERT INTO poll_votes(message_id,user_id,option_index,voted_at) VALUES($1,$2,$3,$4)',[m.id,req.user.id,oi,Date.now()]);
  res.json(await pollForMessage(m.id,p,req.user.id));
 });
 app.get('/api/groups/:id/messages',auth,async(req,res)=>{
@@ -782,7 +788,7 @@ app.post('/api/messages/:uid',auth,async(req,res)=>{
   await pool.query('INSERT INTO messages(id,"from","to",text,type,media_url,created_at) VALUES($1,$2,$3,$4,$5,$6,$7)',[m.id,m.from,m.to,m.text,m.type,m.mediaUrl,m.createdAt]);
   const socketMedia=m.mediaUrl;io.to(to).emit('message',{...m,mediaUrl:socketMedia});m.mediaUrl=socketMedia;
   const local=new Date();const activityEvent=type==='image'?'photo':type==='audio'?'voice':'message';const activityResult=await applyActivity(req.user.id,activityEvent,local.getFullYear()+"-"+String(local.getMonth()+1).padStart(2,"0")+"-"+String(local.getDate()).padStart(2,"0"),local.getHours(),{peerId:to});
-  res.json({...m,...activityResult});
+  if(m.type==='poll')m.poll=await pollForMessage(m.id,m.text,req.user.id);res.json({...m,...activityResult});
 });
 
 app.get('/api/messages/:uid/pinned',auth,async(req,res)=>{
@@ -855,7 +861,7 @@ app.post('/api/groups/:id/messages',auth,async(req,res)=>{
  const m={id:id(),groupId:req.params.id,from:req.user.id,text:type==='text'?text:'',type,mediaUrl:type==='text'?'':mediaUrl,createdAt:Date.now(),edited:false,deleted:false};
  await pool.query('INSERT INTO group_messages(id,group_id,"from",text,type,media_url,created_at) VALUES($1,$2,$3,$4,$5,$6,$7)',[m.id,m.groupId,m.from,m.text,m.type,m.mediaUrl,m.createdAt]);
  const ms=await pool.query('SELECT user_id FROM group_members WHERE group_id=$1',[m.groupId]);
- for(const x of ms.rows)io.to(x.user_id).emit('group:message',{...m,mediaUrl:m.mediaUrl});res.json({...m,mediaUrl:m.mediaUrl});
+ for(const x of ms.rows)io.to(x.user_id).emit('group:message',{...m,mediaUrl:m.mediaUrl});if(m.type==='poll')m.poll=await pollForMessage(m.id,m.text,req.user.id);res.json({...m,mediaUrl:m.mediaUrl});
 });
 app.get('/api/messages/search',auth,async(req,res)=>{
  const q=String(req.query.q||'').trim();if(q.length<2)return res.json([]);
