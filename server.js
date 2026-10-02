@@ -894,6 +894,7 @@ io.on('connection',async socket=>{
 
 app.get('/',(req,res)=>res.sendFile(path.join(ROOT,'index.html')));
 app.get('/index.html',(req,res)=>res.sendFile(path.join(ROOT,'index.html')));
+app.get('/download',(req,res)=>res.sendFile(path.join(ROOT,'download.html')));
 
 initDb().then(()=>server.listen(PORT,'0.0.0.0',()=>{
   console.log(`SpiderGram server listening on port ${PORT} with PostgreSQL`);
