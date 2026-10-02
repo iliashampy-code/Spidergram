@@ -123,10 +123,10 @@ async function showUserProfile(username,fromAdmin=false){try{const x=String(user
     </div>
     <div class="user-card-info">
       <div><span>🕸️</span><div><small>SpiderGram ID</small><b>${esc(String(x.id))}</b></div></div>
-      <div><span>🏆</span><div><small>Титул</small><b>${esc(x.selectedTitle||x.customTitle||"Нет выбранного титула")}</b></div></div>
+      <div><span>🏆</span><div><small>Титулов</small><b>${Array.isArray(x.titleAwards)?x.titleAwards.length:(x.selectedTitle||x.customTitle?1:0)}</b></div></div>
     </div>
     ${x.id!==user.id?'<button class="primary user-card-call" onclick=\'sendCall('+JSON.stringify(x.id)+','+JSON.stringify(x.name||x.username)+')\'>Позвать</button>':""}
-    ${x.id!==user.id?'<button class="profile-action user-card-delete" onclick=\'deleteChatFromProfile('+JSON.stringify(x.id)+')\'>🗑️ Удалить чат</button>':""}
+    ${x.id!==user.id?'<button class="profile-action user-card-delete" onclick=\'deleteChatFromProfile('+JSON.stringify(x.id)+')\'>Удалить чат</button>':""}
   </div>
 </div>`; }catch(e){alert(e.message)}}async function sendCall(uid,name){try{await api("/api/users/"+encodeURIComponent(uid)+"/call",{method:"POST"});showCallToast("Запрос отправлен пользователю "+name)}catch(e){alert(e.message)}}async function loadCallNotifications(){try{const a=await api("/api/notifications");a.reverse().forEach(notifyCall)}catch{}}function showCallToast(text){const old=document.getElementById("callToast");if(old)old.remove();const el=document.createElement("div");el.id="callToast";el.className="call-toast";el.textContent=text;document.body.appendChild(el);setTimeout(()=>el.remove(),4000)}async function notifyCall(n){const name=n?.from?.name||n?.from?.username||"Пользователь";showCallToast(name+" хочет с вами поговорить");if("serviceWorker"in navigator&&"Notification"in window&&Notification.permission==="granted"){try{const reg=await navigator.serviceWorker.ready;await reg.showNotification("SpiderGram",{body:name+" хочет с вами поговорить",tag:"call",data:{url:"/"}})}catch{}}}
 async function deleteChatFromProfile(uid){if(!confirm("Удалить этот чат? Он исчезнет только у тебя."))return;try{await api("/api/chats/"+encodeURIComponent(uid),{method:"DELETE"});peer=null;home()}catch(e){alert("Не удалось удалить чат: "+e.message)}}
