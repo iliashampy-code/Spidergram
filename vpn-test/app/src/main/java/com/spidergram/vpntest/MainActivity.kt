@@ -10,26 +10,86 @@ import android.widget.TextView
 
 class MainActivity : Activity() {
     private lateinit var status: TextView
+    private lateinit var button: Button
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(32,80,32,32) }
-        val title = TextView(this).apply { text = "SpiderGram"; textSize = 30f }
-        status = TextView(this).apply { text = "⚪ Отключено"; textSize = 18f; setPadding(0,12,0,24) }
-        val button = Button(this).apply { text = "Подключить" }
-        button.setOnClickListener {
-            val intent = VpnService.prepare(this)
-            if (intent != null) startActivityForResult(intent, 100) else startVpn()
+
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(32, 80, 32, 32)
         }
-        root.addView(title); root.addView(status); root.addView(button)
+
+        val title = TextView(this).apply {
+            text = "SpiderGram"
+            textSize = 30f
+        }
+
+        status = TextView(this).apply {
+            text = "⚪ Отключено"
+            textSize = 18f
+            setPadding(0, 12, 0, 24)
+        }
+
+        button = Button(this).apply {
+            text = "Подключить"
+            setOnClickListener { toggleVpn() }
+        }
+
+        root.addView(title)
+        root.addView(status)
+        root.addView(button)
         setContentView(root)
     }
-    private fun startVpn() {
-        startService(Intent(this, SpiderVpnService::class.java))
-        status.text = "🟡 Подключение…"
+
+    private fun toggleVpn() {
+        if (SpiderVpnController.isConnected) {
+            SpiderVpnController.disconnect()
+            render(false)
+            return
+        }
+
+        val permissionIntent = VpnService.prepare(this)
+        if (permissionIntent != null) {
+            status.text = "🟡 Подключение…"
+            startActivityForResult(permissionIntent, REQUEST_VPN)
+        } else {
+            connectVpn()
+        }
     }
+
+    private fun connectVpn() {
+        status.text = "🟡 Подключение…"
+        button.isEnabled = false
+        Thread {
+            val ok = SpiderVpnController.connect(this)
+            runOnUiThread {
+                button.isEnabled = true
+                if (ok) {
+                    status.text = "🟢 Подключено"
+                    button.text = "Отключить"
+                } else {
+                    status.text = "🔴 Не удалось подключиться"
+                    button.text = "Подключить"
+                }
+            }
+        }.start()
+    }
+
+    private fun render(connected: Boolean) {
+        status.text = if (connected) "🟢 Подключено" else "⚪ Отключено"
+        button.text = if (connected) "Отключить" else "Подключить"
+    }
+
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode == 100 && resultCode == RESULT_OK) startVpn()
-        else if (requestCode == 100) status.text = "⚪ Отключено"
+        if (requestCode != REQUEST_VPN) return
+
+        if (resultCode == RESULT_OK) connectVpn()
+        else render(false)
+    }
+
+    companion object {
+        private const val REQUEST_VPN = 100
     }
 }
