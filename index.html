@@ -346,6 +346,10 @@ async function profileSettings(){try{
    <button class=primary onclick=saveBio()>Сохранить описание</button>
   </div>
   <div class=section>
+   <h3>ПРИЛОЖЕНИЕ</h3>
+   <button class=profile-action onclick="downloadPage()">📱 Скачать SpiderGram для Android <span style="float:right">›</span></button>
+  </div>
+  <div class=section>
    <h3>ДАННЫЕ</h3>
    <div class=setting><span>Имя</span><b>${esc(me.name||"Без имени")}</b></div>
    <div class=setting><span>Ник</span><b>@${esc(me.username||"username")}</b></div>
