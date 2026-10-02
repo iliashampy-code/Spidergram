@@ -128,7 +128,7 @@ async function showMissedSummary(){
   if(!rows.length)rows.push("✨ Пока ничего нового");
   const overlay=document.createElement("div");
   overlay.id="returnSummaryOverlay";overlay.className="return-summary-overlay";
-  overlay.innerHTML='<div class="return-summary-card"><div class="return-summary-head"><div class="return-summary-icon">🔮</div><div><h2>Что я пропустил?</h2><div class="return-summary-sub">Краткая сводка с момента твоего прошлого визита</div></div></div><div class="return-summary-list">'+rows.join("").replace(/<b>(\\d+)<\\/b>/g,"<b>$1</b>")+'</div><div class="return-summary-actions"><button class="primary" type="button">Понятно</button></div></div>';
+  overlay.innerHTML='<div class="return-summary-card"><div class="return-summary-head"><div class="return-summary-icon">🔮</div><div><h2>Что я пропустил?</h2><div class="return-summary-sub">Краткая сводка с момента твоего прошлого визита</div></div></div><div class="return-summary-list">'+rows.join("")+'</div><div class="return-summary-actions"><button class="primary" type="button">Понятно</button></div></div>';
   overlay.querySelector("button").onclick=closeReturnSummary;overlay.addEventListener("click",e=>{if(e.target===overlay)closeReturnSummary();});document.body.appendChild(overlay);
  }catch(e){console.warn("missed summary",e)}
 }
