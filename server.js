@@ -883,6 +883,10 @@ io.on('connection',async socket=>{
   await pool.query('UPDATE users SET online=true,last_seen=NULL WHERE id=$1',[u.id]);
   socket.join(u.id);
   io.emit('presence',{userId:u.id,online:true,lastSeen:null});
+  socket.on('call:offer',d=>{if(d?.to&&d?.offer)io.to(String(d.to)).emit('call:offer',{from:u.id,offer:d.offer});});
+  socket.on('call:answer',d=>{if(d?.to&&d?.answer)io.to(String(d.to)).emit('call:answer',{from:u.id,answer:d.answer});});
+  socket.on('call:ice',d=>{if(d?.to&&d?.candidate)io.to(String(d.to)).emit('call:ice',{from:u.id,candidate:d.candidate});});
+  socket.on('call:end',d=>{if(d?.to)io.to(String(d.to)).emit('call:end',{from:u.id});});
   socket.on('typing',d=>{if(d?.to)io.to(d.to).emit('typing',{from:u.id,typing:!!d.typing});});
   socket.on('read',d=>{if(d?.to)io.to(d.to).emit('read',{from:u.id});});
   socket.on('disconnect',async()=>{const seen=Date.now();await pool.query('UPDATE users SET online=false,last_seen=$1 WHERE id=$2',[seen,u.id]).catch(()=>{});io.emit('presence',{userId:u.id,online:false,lastSeen:seen});});
