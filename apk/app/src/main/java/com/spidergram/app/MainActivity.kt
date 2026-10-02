@@ -35,7 +35,6 @@ class MainActivity : AppCompatActivity() {
         webView = WebView(this)
         setContentView(webView)
         setupWebView()
-        requestMediaPermissions()
         webView.loadUrl(SITE_URL)
     }
 
@@ -55,8 +54,20 @@ class MainActivity : AppCompatActivity() {
 
         webView.webViewClient = object : WebViewClient() {
             override fun onRenderProcessGone(view: WebView, detail: android.webkit.RenderProcessGoneDetail): Boolean {
-                Toast.makeText(this@MainActivity, "SpiderGram перезапускает страницу…", Toast.LENGTH_SHORT).show()
-                view.post { view.loadUrl(SITE_URL) }
+                Toast.makeText(this@MainActivity, "SpiderGram перезапускается…", Toast.LENGTH_SHORT).show()
+                runOnUiThread {
+                    try {
+                        val parent = view.parent as? android.view.ViewGroup
+                        parent?.removeView(view)
+                        view.destroy()
+                        webView = WebView(this@MainActivity)
+                        setContentView(webView)
+                        setupWebView()
+                        webView.loadUrl(SITE_URL)
+                    } catch (_: Exception) {
+                        finish()
+                    }
+                }
                 return true
             }
 
