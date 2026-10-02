@@ -108,7 +108,27 @@ async function addGroupMemberPrompt(){if(!currentGroup)return;const username=pro
 async function closeCall(sendEnd=true){const c=activeCall;if(sendEnd&&c?.peerId&&sock)sock.emit("call:end",{to:c.peerId});if(c?.stream)c.stream.getTracks().forEach(t=>t.stop());if(callRemoteAudio){callRemoteAudio.srcObject=null;callRemoteAudio.remove();callRemoteAudio=null}if(c?.pc)try{c.pc.close()}catch{}activeCall=null;document.getElementById("callPanel")?.remove()}
 function callPanel(name,status,avatarHtml,actions){document.getElementById("callPanel")?.remove();document.body.insertAdjacentHTML("beforeend",'<div class="call-panel" id="callPanel"><div class="call-box"><div class="call-avatar">'+avatarHtml+'</div><div class="call-name">'+esc(name)+'</div><div class="call-status" id="callStatus">'+esc(status)+'</div><div class="call-actions" id="callActions">'+actions+'</div></div></div>')}
 function makePeerConnection(peerId){const pc=new RTCPeerConnection({iceServers:[{urls:"stun:stun.l.google.com:19302"},{urls:"stun:stun.cloudflare.com:3478"}]});pc.onicecandidate=e=>{if(e.candidate)sock.emit("call:ice",{to:peerId,candidate:e.candidate})};pc.ontrack=e=>{if(!callRemoteAudio){callRemoteAudio=document.createElement("audio");callRemoteAudio.autoplay=true;callRemoteAudio.playsInline=true;document.body.appendChild(callRemoteAudio)}callRemoteAudio.srcObject=e.streams[0]};pc.onconnectionstatechange=()=>{if(activeCall&&["failed","disconnected","closed"].includes(pc.connectionState))closeCall(false)};return pc}
-async function startCall(uid,name,avatarHtml){if(activeCall)return;try{const stream=await navigator.mediaDevices.getUserMedia({audio:true,video:false});const pc=makePeerConnection(uid);stream.getTracks().forEach(t=>pc.addTrack(t,stream));activeCall={peerId:uid,name,pc,stream,initiator:true};callPanel(name,"Вызов…",avatarHtml,'<button class="chip call-danger" onclick="closeCall()">Завершить</button>');const offer=await pc.createOffer();await pc.setLocalDescription(offer);sock.emit("call:offer",{to:uid,offer:pc.localDescription})}catch(e){closeCall(false);alert(e.name==="NotAllowedError"?"Разреши доступ к микрофону для звонков.":"Не удалось начать звонок: "+e.message)}}
+async function startCall(uid,name,avatarHtml){
+ if(activeCall)return;
+ if(!sock||!sock.connected){alert("Соединение с сервером ещё не установлено. Открой чат заново и попробуй ещё раз.");return}
+ if(!window.RTCPeerConnection){alert("Этот браузер не поддерживает звонки.");return}
+ if(!navigator.mediaDevices?.getUserMedia){alert("Браузер не дал доступ к микрофону. Открой SpiderGram по HTTPS и разреши микрофон.");return}
+ callPanel(name,"Подключение к звонку…",avatarHtml,'<button class="chip call-danger" onclick="closeCall()">Отменить</button>');
+ try{
+  const stream=await navigator.mediaDevices.getUserMedia({audio:true,video:false});
+  const pc=makePeerConnection(uid);
+  stream.getTracks().forEach(t=>pc.addTrack(t,stream));
+  activeCall={peerId:uid,name,pc,stream,initiator:true};
+  document.getElementById("callStatus").textContent="Вызов…";
+  document.getElementById("callActions").innerHTML='<button class="chip call-danger" onclick="closeCall()">Завершить</button>';
+  const offer=await pc.createOffer();
+  await pc.setLocalDescription(offer);
+  sock.emit("call:offer",{to:uid,offer:pc.localDescription});
+ }catch(e){
+  closeCall(false);
+  alert(e.name==="NotAllowedError"?"Разреши доступ к микрофону для звонков.":e.name==="NotFoundError"?"Микрофон не найден.":"Не удалось начать звонок: "+(e.message||e))
+ }
+}
 async function acceptCall(){const c=activeCall;if(!c?.incomingOffer)return;try{const stream=await navigator.mediaDevices.getUserMedia({audio:true,video:false});c.stream=stream;stream.getTracks().forEach(t=>c.pc.addTrack(t,stream));await c.pc.setRemoteDescription(new RTCSessionDescription(c.incomingOffer));const answer=await c.pc.createAnswer();await c.pc.setLocalDescription(answer);sock.emit("call:answer",{to:c.peerId,answer:c.pc.localDescription});document.getElementById("callStatus").textContent="Соединение…";document.getElementById("callActions").innerHTML='<button class="chip call-danger" onclick="closeCall()">Завершить</button>'}catch(e){closeCall();alert(e.name==="NotAllowedError"?"Разреши доступ к микрофону для звонков.":"Не удалось принять звонок: "+e.message)}}
 function rejectCall(){if(activeCall?.peerId)sock.emit("call:end",{to:activeCall.peerId});closeCall(false)}
 function notifyIncomingCall(d){if(activeCall)return;const from=d?.from;if(!from)return;const p=makePeerConnection(from);activeCall={peerId:from,name:d.name||"Пользователь",pc:p,incomingOffer:d.offer,incoming:true};callPanel(activeCall.name,"Входящий аудиозвонок",d.avatar||"👤",'<button class="chip call-danger" onclick="rejectCall()">Отклонить</button><button class="chip call-success" onclick="acceptCall()">Принять</button>')}
