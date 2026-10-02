@@ -174,6 +174,14 @@ async function initDb(){
     CREATE TABLE IF NOT EXISTS group_members(group_id TEXT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,role TEXT NOT NULL DEFAULT 'member',joined_at BIGINT NOT NULL,PRIMARY KEY(group_id,user_id));
     CREATE TABLE IF NOT EXISTS group_messages(id TEXT PRIMARY KEY,group_id TEXT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,"from" TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,text TEXT NOT NULL DEFAULT '',type TEXT NOT NULL DEFAULT 'text',media_url TEXT NOT NULL DEFAULT '',created_at BIGINT NOT NULL,edited BOOLEAN NOT NULL DEFAULT FALSE,deleted BOOLEAN NOT NULL DEFAULT FALSE);
     CREATE INDEX IF NOT EXISTS group_messages_idx ON group_messages(group_id,created_at);
+    CREATE TABLE IF NOT EXISTS poll_votes(
+      message_id TEXT NOT NULL,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      option_index INTEGER NOT NULL,
+      voted_at BIGINT NOT NULL,
+      PRIMARY KEY(message_id,user_id,option_index)
+    );
+    CREATE INDEX IF NOT EXISTS poll_votes_message_idx ON poll_votes(message_id);
     ALTER TABLE messages ADD COLUMN IF NOT EXISTS edited BOOLEAN NOT NULL DEFAULT FALSE;
     ALTER TABLE messages ADD COLUMN IF NOT EXISTS deleted BOOLEAN NOT NULL DEFAULT FALSE;
     ALTER TABLE messages ADD COLUMN IF NOT EXISTS reply_to TEXT;
@@ -695,6 +703,45 @@ app.post('/api/groups/:id/members',auth,async(req,res)=>{
  await pool.query('INSERT INTO group_members(group_id,user_id,role,joined_at) VALUES($1,$2,\'member\',$3) ON CONFLICT DO NOTHING',[req.params.id,uid,Date.now()]);
  res.json({ok:true});
 });
+
+async function pollForMessage(messageId, pollRaw, viewerId){
+ try{
+  const p=typeof pollRaw==='string'?JSON.parse(pollRaw):pollRaw;
+  if(!p||p.kind!=='poll'||!Array.isArray(p.options)||p.options.length<2)return null;
+  const votes=await pool.query('SELECT user_id,option_index FROM poll_votes WHERE message_id=$1',[messageId]);
+  const counts=p.options.map(()=>0);
+  const mine=[];
+  for(const v of votes.rows){
+    const oi=Number(v.option_index);
+    if(oi>=0&&oi<p.options.length){counts[oi]++;if(v.user_id===viewerId)mine.push(oi);}
+  }
+  return {...p,counts,voters:votes.rowCount,mine:[...new Set(mine)]};
+ }catch{return null}
+}
+app.get('/api/polls/:id',auth,async(req,res)=>{
+ const r=await pool.query('SELECT id,"from",to,text,type,created_at FROM messages WHERE id=$1',[req.params.id]);
+ if(!r.rowCount||r.rows[0].type!=='poll')return res.status(404).json({error:'Опрос не найден'});
+ const m=r.rows[0], p=await pollForMessage(m.id,m.text,req.user.id);
+ if(!p)return res.status(400).json({error:'Некорректный опрос'});
+ if(m.from!==req.user.id&&m.to!==req.user.id)return res.status(403).json({error:'Нет доступа'});
+ res.json(p);
+});
+app.post('/api/messages/:id/poll-vote',auth,async(req,res)=>{
+ const r=await pool.query('SELECT id,"from",to,text,type,created_at FROM messages WHERE id=$1',[req.params.id]);
+ if(!r.rowCount||r.rows[0].type!=='poll')return res.status(404).json({error:'Опрос не найден'});
+ const m=r.rows[0];
+ if(m.from!==req.user.id&&m.to!==req.user.id)return res.status(403).json({error:'Нет доступа'});
+ let p;try{p=JSON.parse(m.text)}catch{return res.status(400).json({error:'Некорректный опрос'})}
+ const now=Date.now();
+ if(p.endsAt&&now>=Number(p.endsAt))return res.status(400).json({error:'Опрос уже завершён'});
+ let selected=Array.isArray(req.body.optionIndexes)?req.body.optionIndexes.map(Number):[Number(req.body.optionIndex)];
+ selected=[...new Set(selected.filter(x=>Number.isInteger(x)&&x>=0&&x<p.options.length))];
+ if(!selected.length)return res.status(400).json({error:'Выбери вариант'});
+ if(p.multiple!==true&&selected.length>1)selected=selected.slice(0,1);
+ await pool.query('DELETE FROM poll_votes WHERE message_id=$1 AND user_id=$2',[m.id,req.user.id]);
+ for(const oi of selected)await pool.query('INSERT INTO poll_votes(message_id,user_id,option_index,voted_at) VALUES($1,$2,$3,$4)',[m.id,req.user.id,oi,now]);
+ res.json(await pollForMessage(m.id,p,req.user.id));
+});
 app.get('/api/groups/:id/messages',auth,async(req,res)=>{
  const mem=await pool.query('SELECT 1 FROM group_members WHERE group_id=$1 AND user_id=$2',[req.params.id,req.user.id]); if(!mem.rowCount)return res.status(403).json({error:'Нет доступа'});
  const r=await pool.query('SELECT id,"from",text,type,media_url,created_at,edited,deleted FROM group_messages WHERE group_id=$1 ORDER BY created_at ASC LIMIT 500',[req.params.id]);
@@ -718,7 +765,7 @@ app.get('/api/messages/:uid',auth,async(req,res)=>{
   const ids=r.rows.map(m=>m.id);
   let rx=[];
   if(ids.length){const q=await pool.query('SELECT message_id,user_id,emoji FROM reactions WHERE message_id=ANY($1)',[ids]);rx=q.rows;}
-  const out=[];for(const m of r.rows.reverse()){let media=m.deleted?'':m.media_url;out.push({id:m.id,from:m.from,to:m.to,text:m.deleted?'Сообщение удалено':m.text,type:m.deleted?'deleted':m.type,mediaUrl:media,createdAt:Number(m.created_at),edited:!!m.edited,deleted:!!m.deleted,read:m.from===req.user.id&&peerLastRead>=Number(m.created_at),reactions:rx.filter(x=>x.message_id===m.id).map(x=>({userId:x.user_id,emoji:x.emoji}))})}res.json(out);
+  const out=[];for(const m of r.rows.reverse()){let media=m.deleted?'':m.media_url;const item={id:m.id,from:m.from,to:m.to,text:m.deleted?'Сообщение удалено':m.text,type:m.deleted?'deleted':m.type,mediaUrl:media,createdAt:Number(m.created_at),edited:!!m.edited,deleted:!!m.deleted,read:m.from===req.user.id&&peerLastRead>=Number(m.created_at),reactions:rx.filter(x=>x.message_id===m.id).map(x=>({userId:x.user_id,emoji:x.emoji}))};if(!m.deleted&&m.type==='poll')item.poll=await pollForMessage(m.id,m.text,req.user.id);out.push(item)}res.json(out);
 });
 
 app.post('/api/messages/:uid',auth,async(req,res)=>{
@@ -728,6 +775,7 @@ app.post('/api/messages/:uid',auth,async(req,res)=>{
   if(type==='text'){if(!text||text.length>4000)return res.status(400).json({error:'Сообщение пустое или длиннее 4000 символов'});}
   else if(type==='image'||type==='video'){const prefix=type==='image'?'data:image/':'data:video/';if(!mediaUrl.startsWith(prefix))return res.status(400).json({error:type==='image'?'Некорректное изображение':'Некорректное видео'});if(mediaUrl.length>16800000)return res.status(413).json({error:(type==='image'?'Фото':'Видео')+' слишком большое. Лимит: 12 МБ'});}
   else if(type==='audio'){if(!mediaUrl.startsWith('data:audio/'))return res.status(400).json({error:'Некорректное аудио'});else if(mediaUrl.length>7000000)return res.status(413).json({error:'Голосовое слишком большое'});}
+  else if(type==='poll'){let p;try{p=JSON.parse(text)}catch{return res.status(400).json({error:'Некорректный опрос'})}if(p?.kind!=='poll'||!Array.isArray(p.options)||p.options.length<2||p.options.length>10||p.options.some(x=>String(x).trim().length<1||String(x).length>120))return res.status(400).json({error:'Некорректные варианты опроса'});if(String(p.question||'').trim().length<1||String(p.question).length>240)return res.status(400).json({error:'Некорректный вопрос'});if(p.endsAt&&Number(p.endsAt)<=Date.now())return res.status(400).json({error:'Некорректный срок опроса'});}
   else return res.status(400).json({error:'Неизвестный тип сообщения'});
   await pool.query('DELETE FROM hidden_chats WHERE user_id=$1 AND peer_id=$2',[req.user.id,to]);
   const sender=await getUser(req.user.id);const storedMedia=mediaUrl;const m={id:id(),from:req.user.id,to,text:type==='text'?text:'',type,mediaUrl:type==='text'?'':storedMedia,createdAt:Date.now(),edited:false,deleted:false,reactions:[],sender:sender?{id:sender.id,name:sender.name,username:sender.username,avatar:sender.avatar}:null};
@@ -794,7 +842,7 @@ app.get('/api/groups/:id/messages',auth,async(req,res)=>{
  const ok=await pool.query('SELECT 1 FROM group_members WHERE group_id=$1 AND user_id=$2',[req.params.id,req.user.id]);
  if(!ok.rowCount)return res.status(403).json({error:'Нет доступа'});
  const r=await pool.query('SELECT id,"from",text,type,media_url,created_at,edited,deleted FROM group_messages WHERE group_id=$1 ORDER BY created_at DESC LIMIT 300',[req.params.id]);
- const out=[];for(const m of r.rows.reverse()){let media=m.deleted?'':m.media_url;out.push({id:m.id,from:m.from,text:m.deleted?'Сообщение удалено':m.text,type:m.deleted?'deleted':m.type,mediaUrl:media,createdAt:Number(m.created_at),edited:!!m.edited,deleted:!!m.deleted})}res.json(out);
+ const out=[];for(const m of r.rows.reverse()){let media=m.deleted?'':m.media_url;const item={id:m.id,from:m.from,text:m.deleted?'Сообщение удалено':m.text,type:m.deleted?'deleted':m.type,mediaUrl:media,createdAt:Number(m.created_at),edited:!!m.edited,deleted:!!m.deleted};if(!m.deleted&&m.type==='poll')item.poll=await pollForMessage(m.id,m.text,req.user.id);out.push(item)}res.json(out);
 });
 app.post('/api/groups/:id/messages',auth,async(req,res)=>{
  const ok=await pool.query('SELECT 1 FROM group_members WHERE group_id=$1 AND user_id=$2',[req.params.id,req.user.id]);
@@ -803,6 +851,7 @@ app.post('/api/groups/:id/messages',auth,async(req,res)=>{
  if(type==='text'&&(!text||text.length>4000))return res.status(400).json({error:'Сообщение пустое или слишком длинное'});
  if(type==='image'||type==='video'){const prefix=type==='image'?'data:image/':'data:video/';if(!mediaUrl.startsWith(prefix))return res.status(400).json({error:type==='image'?'Некорректное изображение':'Некорректное видео'});if(mediaUrl.length>16800000)return res.status(413).json({error:(type==='image'?'Фото':'Видео')+' слишком большое. Лимит: 12 МБ'});}
  if(type==='audio'&&!mediaUrl.startsWith('data:audio/'))return res.status(400).json({error:'Некорректное аудио'});
+ if(type==='poll'){let p;try{p=JSON.parse(text)}catch{return res.status(400).json({error:'Некорректный опрос'})}if(p?.kind!=='poll'||!Array.isArray(p.options)||p.options.length<2||p.options.length>10||p.options.some(x=>String(x).trim().length<1||String(x).length>120))return res.status(400).json({error:'Некорректные варианты опроса'});if(String(p.question||'').trim().length<1||String(p.question).length>240)return res.status(400).json({error:'Некорректный вопрос'});if(p.endsAt&&Number(p.endsAt)<=Date.now())return res.status(400).json({error:'Некорректный срок опроса'});}
  const m={id:id(),groupId:req.params.id,from:req.user.id,text:type==='text'?text:'',type,mediaUrl:type==='text'?'':mediaUrl,createdAt:Date.now(),edited:false,deleted:false};
  await pool.query('INSERT INTO group_messages(id,group_id,"from",text,type,media_url,created_at) VALUES($1,$2,$3,$4,$5,$6,$7)',[m.id,m.groupId,m.from,m.text,m.type,m.mediaUrl,m.createdAt]);
  const ms=await pool.query('SELECT user_id FROM group_members WHERE group_id=$1',[m.groupId]);
