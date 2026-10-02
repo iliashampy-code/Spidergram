@@ -1,26 +1,50 @@
 name: Build SpiderGram VPN test APK
+
 on:
   workflow_dispatch:
   push:
-    branches: [ vpn-test ]
+    branches: [vpn-test]
   pull_request:
-    branches: [ main ]
+    branches: [main]
+
 jobs:
   build:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: vpn-test
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
-      - uses: android-actions/setup-android@v3
-      - uses: gradle/actions/setup-gradle@v4
-      - run: gradle assembleDebug
-      - uses: actions/upload-artifact@v4
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.13"
+
+      - name: Inject private WireGuard config
+        env:
+          SPIDERGRAM_WG_CONFIG: ${{ secrets.SPIDERGRAM_WG_CONFIG }}
+        run: |
+          if [ -z "$SPIDERGRAM_WG_CONFIG" ]; then
+            echo "Missing GitHub Actions secret SPIDERGRAM_WG_CONFIG"
+            exit 1
+          fi
+          mkdir -p vpn-test/app/src/main/res/raw
+          printf '%s\n' "$SPIDERGRAM_WG_CONFIG" > vpn-test/app/src/main/res/raw/spidergram.conf
+
+      - name: Build debug APK
+        working-directory: vpn-test
+        run: gradle :app:assembleDebug --no-daemon
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
         with:
           name: spidergram-vpn-test
           path: vpn-test/app/build/outputs/apk/debug/app-debug.apk
