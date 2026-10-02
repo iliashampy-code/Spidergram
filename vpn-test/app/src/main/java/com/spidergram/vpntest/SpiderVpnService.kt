@@ -1,20 +1,48 @@
 package com.spidergram.vpntest
 
-import android.net.VpnService
-import android.os.ParcelFileDescriptor
+import android.content.Context
+import com.wireguard.android.backend.GoBackend
+import com.wireguard.android.backend.Tunnel
+import com.wireguard.config.Config
 
-class SpiderVpnService : VpnService() {
-    private var vpnInterface: ParcelFileDescriptor? = null
-    override fun onStartCommand(intent: android.content.Intent?, flags: Int, startId: Int): Int {
-        vpnInterface?.close()
-        vpnInterface = Builder()
-            .setSession("SpiderGram")
-            .addAddress("10.8.0.2", 32)
-            .addRoute("10.8.0.1", 32)
-            .establish()
-        return START_STICKY
+object SpiderVpnController {
+    private const val TUNNEL_NAME = "SpiderGram"
+    private var backend: GoBackend? = null
+
+    @Volatile
+    var isConnected: Boolean = false
+        private set
+
+    private val tunnel = object : Tunnel {
+        override fun getName(): String = TUNNEL_NAME
+
+        override fun onStateChange(newState: Tunnel.State) {
+            isConnected = newState == Tunnel.State.UP
+        }
     }
-    override fun onDestroy() {
-        vpnInterface?.close(); vpnInterface = null; super.onDestroy()
+
+    fun connect(context: Context): Boolean {
+        return try {
+            val b = backend ?: GoBackend(context.applicationContext).also { backend = it }
+            val config = context.resources.openRawResource(R.raw.spidergram).use { input ->
+                Config.parse(input)
+            }
+            val state = b.setState(tunnel, Tunnel.State.UP, config)
+            isConnected = state == Tunnel.State.UP
+            isConnected
+        } catch (_: Exception) {
+            isConnected = false
+            false
+        }
+    }
+
+    fun disconnect() {
+        try {
+            backend?.setState(tunnel, Tunnel.State.DOWN, null)
+        } catch (_: Exception) {
+            // Keep UI state consistent even if the backend is already down.
+        } finally {
+            isConnected = false
+        }
     }
 }
