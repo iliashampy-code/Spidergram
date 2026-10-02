@@ -895,6 +895,7 @@ io.on('connection',async socket=>{
 app.get('/',(req,res)=>res.sendFile(path.join(ROOT,'index.html')));
 app.get('/index.html',(req,res)=>res.sendFile(path.join(ROOT,'index.html')));
 app.get('/download',(req,res)=>res.sendFile(path.join(ROOT,'download.html')));
+app.get('/downloads/SpiderGram.apk',(req,res)=>res.download(path.join(ROOT,'downloads','SpiderGram.apk'),'SpiderGram.apk',err=>{if(err&&!res.headersSent)res.status(404).send('APK пока не собран. Попробуйте немного позже.');}));
 
 initDb().then(()=>server.listen(PORT,'0.0.0.0',()=>{
   console.log(`SpiderGram server listening on port ${PORT} with PostgreSQL`);
