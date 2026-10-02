@@ -185,7 +185,6 @@ async function initDb(){
     ALTER TABLE messages ADD COLUMN IF NOT EXISTS edited BOOLEAN NOT NULL DEFAULT FALSE;
     ALTER TABLE messages ADD COLUMN IF NOT EXISTS deleted BOOLEAN NOT NULL DEFAULT FALSE;
     ALTER TABLE messages ADD COLUMN IF NOT EXISTS reply_to TEXT;
-    CREATE TABLE IF NOT EXISTS pinned_messages(message_id TEXT PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,pinned_at BIGINT NOT NULL);
     CREATE TABLE IF NOT EXISTS pinned_chats(user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,peer_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,pinned_at BIGINT NOT NULL,PRIMARY KEY(user_id,peer_id));
     CREATE TABLE IF NOT EXISTS reactions(
       message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
@@ -794,17 +793,6 @@ app.post('/api/messages/:uid',auth,async(req,res)=>{
   if(m.type==='poll')m.poll=await pollForMessage(m.id,m.text,req.user.id);res.json({...m,...activityResult});
 });
 
-app.get('/api/messages/:uid/pinned',auth,async(req,res)=>{
- const r=await pool.query(`SELECT m.id,m."from",m."to",m.text,m.type,m.media_url,m.created_at,m.edited,m.deleted FROM pinned_messages p JOIN messages m ON m.id=p.message_id WHERE p.user_id=$1 AND ((m."from"=$1 AND m."to"=$2) OR (m."from"=$2 AND m."to"=$1)) ORDER BY p.pinned_at DESC`,[req.user.id,req.params.uid]);
- res.json(r.rows.map(m=>({id:m.id,from:m.from,to:m.to,text:m.deleted?'Сообщение удалено':m.text,type:m.deleted?'deleted':m.type,mediaUrl:m.deleted?'':m.media_url,createdAt:Number(m.created_at),edited:!!m.edited,deleted:!!m.deleted,pinned:true})));
-});
-app.post('/api/messages/:id/pin',auth,async(req,res)=>{
- const m=await pool.query('SELECT "from","to" FROM messages WHERE id=$1 AND ("from"=$2 OR "to"=$2)',[req.params.id,req.user.id]); if(!m.rowCount)return res.status(404).json({error:'Сообщение не найдено'});
- const old=await pool.query('SELECT 1 FROM pinned_messages WHERE message_id=$1 AND user_id=$2',[req.params.id,req.user.id]);
- if(old.rowCount) await pool.query('DELETE FROM pinned_messages WHERE message_id=$1 AND user_id=$2',[req.params.id,req.user.id]);
- else await pool.query('INSERT INTO pinned_messages(message_id,user_id,pinned_at) VALUES($1,$2,$3) ON CONFLICT DO NOTHING',[req.params.id,req.user.id,Date.now()]);
- res.json({pinned:!old.rowCount});
-});
 app.patch('/api/messages/:id',auth,async(req,res)=>{
   const text=String(req.body.text||'').trim();
   if(!text||text.length>4000)return res.status(400).json({error:'Сообщение пустое или слишком длинное'});
