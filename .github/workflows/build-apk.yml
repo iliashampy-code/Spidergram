@@ -4,6 +4,11 @@ on:
     paths:
       - 'android-app/**'
       - '.github/workflows/build-apk.yml'
+      - 'server.js'
+      - 'download.html'
+  workflow_dispatch:
+permissions:
+  contents: write
   workflow_dispatch:
 jobs:
   build:
@@ -19,3 +24,16 @@ jobs:
         with:
           name: SpiderGram-APK
           path: android-app/app/build/outputs/apk/debug/app-debug.apk
+      - name: Publish APK to SpiderGram server
+        run: |
+          mkdir -p downloads
+          cp android-app/app/build/outputs/apk/debug/app-debug.apk downloads/SpiderGram.apk
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add downloads/SpiderGram.apk
+          if git diff --cached --quiet; then
+            echo "APK unchanged"
+          else
+            git commit -m "chore: publish SpiderGram APK"
+            git push
+          fi
