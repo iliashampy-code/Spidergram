@@ -18,7 +18,8 @@ app.use(express.json({limit:'20mb'}));
 const ROOT=__dirname;
 const SECRET=process.env.JWT_SECRET||'CHANGE_THIS_SPIDERGRAM_SECRET_2026';
 const PORT=Number(process.env.PORT||3000);
-const FOUNDER_TITLE={key:'founder',name:'Первопроходец',type:'task',start:'#111111',end:'#22c55e',animated:true,description:'Доступен только пользователям, зарегистрированным до SpiderGram 2.0'};
+const PIONEER_GRANT_CUTOFF=Date.parse('2026-10-03T08:13:58Z');
+const FOUNDER_TITLE={key:'founder',name:'Первопроходец',type:'task',start:'#111111',end:'#22c55e',animated:true,description:'Выдан всем пользователям, зарегистрированным до запуска этой награды'};
 const pool=new Pool({connectionString:process.env.DATABASE_URL,ssl:process.env.DATABASE_URL?{rejectUnauthorized:false}:false});
 
 const id=()=>crypto.randomUUID();
@@ -167,15 +168,7 @@ async function initDb(){
     ALTER TABLE users ADD COLUMN IF NOT EXISTS selected_title TEXT NOT NULL DEFAULT '';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS title_awards TEXT NOT NULL DEFAULT '[]';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS currency INTEGER NOT NULL DEFAULT 0;
-        ALTER TABLE users ADD COLUMN IF NOT EXISTS task_state TEXT NOT NULL DEFAULT '{}';
-    const pioneerUsers=await pool.query('SELECT id,title_awards,currency FROM users');
-    for(const pioneer of pioneerUsers.rows){
-      const awards=parseJson(pioneer.title_awards,[]);
-      if(!awards.includes(FOUNDER_TITLE.name)){
-        awards.push(FOUNDER_TITLE.name);
-        await pool.query('UPDATE users SET title_awards=$1,currency=COALESCE(currency,0)+450 WHERE id=$2',[JSON.stringify(awards),pioneer.id]);
-      }
-    }
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS task_state TEXT NOT NULL DEFAULT '{}';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS custom_color_enabled BOOLEAN NOT NULL DEFAULT FALSE;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS shop_owned TEXT NOT NULL DEFAULT '[]';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS shop_equipped TEXT NOT NULL DEFAULT '{}';
@@ -280,6 +273,16 @@ async function initDb(){
     );
     CREATE INDEX IF NOT EXISTS call_notifications_to_idx ON call_notifications(to_user_id,read,created_at);
   `);
+  const pioneerUsers=await pool.query('SELECT id,created_at,title_awards,currency,task_state FROM users WHERE created_at>0 AND created_at<=$1',[PIONEER_GRANT_CUTOFF]);
+  for(const pioneer of pioneerUsers.rows){
+    const state=parseJson(pioneer.task_state,{});
+    if(state&&typeof state==='object'&&!Array.isArray(state)&&!state.pioneerGrant){
+      const awards=parseJson(pioneer.title_awards,[]);
+      if(!awards.includes(FOUNDER_TITLE.name))awards.push(FOUNDER_TITLE.name);
+      state.pioneerGrant=true;
+      await pool.query('UPDATE users SET title_awards=$1,currency=COALESCE(currency,0)+450,task_state=$2 WHERE id=$3',[JSON.stringify(awards),JSON.stringify(state),pioneer.id]);
+    }
+  }
   const pushCfg=await pool.query('SELECT * FROM push_config WHERE id=1');
   if(!pushCfg.rowCount){
     const keys=webpush.generateVAPIDKeys();
