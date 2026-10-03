@@ -948,6 +948,39 @@ io.on('connection',async socket=>{
   socket.on('call:answer',d=>{if(d?.to&&d?.answer)io.to(String(d.to)).emit('call:answer',{from:u.id,answer:d.answer});});
   socket.on('call:ice',d=>{if(d?.to&&d?.candidate)io.to(String(d.to)).emit('call:ice',{from:u.id,candidate:d.candidate});});
   socket.on('call:end',d=>{if(d?.to)io.to(String(d.to)).emit('call:end',{from:u.id});});
+
+  socket.on('group-call:join',async d=>{
+    const groupId=String(d?.groupId||'');
+    if(!groupId)return;
+    const member=await pool.query('SELECT 1 FROM group_members WHERE group_id=$1 AND user_id=$2',[groupId,u.id]);
+    if(!member.rowCount)return;
+    const room='groupcall:'+groupId;
+    const existing=[...io.sockets.adapter.rooms.get(room)||[]]
+      .map(sid=>io.sockets.sockets.get(sid)?.user?.id)
+      .filter(Boolean)
+      .filter(id=>id!==u.id);
+    socket.join(room);
+    socket.emit('group-call:participants',{groupId,participants:[...new Set(existing)]});
+    socket.to(room).emit('group-call:joined',{groupId,userId:u.id,user:publicUser(u)});
+  });
+  socket.on('group-call:offer',async d=>{
+    const groupId=String(d?.groupId||''),to=String(d?.to||'');
+    if(!groupId||!to||!d?.offer)return;
+    const member=await pool.query('SELECT 1 FROM group_members WHERE group_id=$1 AND user_id=$2',[groupId,u.id]);
+    const target=await pool.query('SELECT 1 FROM group_members WHERE group_id=$1 AND user_id=$2',[groupId,to]);
+    if(!member.rowCount||!target.rowCount)return;
+    io.to(to).emit('group-call:offer',{groupId,from:u.id,offer:d.offer});
+  });
+  socket.on('group-call:answer',d=>{
+    if(d?.to&&d?.answer)io.to(String(d.to)).emit('group-call:answer',{groupId:String(d.groupId||''),from:u.id,answer:d.answer});
+  });
+  socket.on('group-call:ice',d=>{
+    if(d?.to&&d?.candidate)io.to(String(d.to)).emit('group-call:ice',{groupId:String(d.groupId||''),from:u.id,candidate:d.candidate});
+  });
+  socket.on('group-call:leave',d=>{
+    const groupId=String(d?.groupId||'');
+    if(groupId){socket.leave('groupcall:'+groupId);socket.to('groupcall:'+groupId).emit('group-call:left',{groupId,userId:u.id});}
+  });
   socket.on('typing',d=>{if(d?.to)io.to(d.to).emit('typing',{from:u.id,typing:!!d.typing});});
   socket.on('read',d=>{if(d?.to)io.to(d.to).emit('read',{from:u.id});});
   socket.on('disconnect',async()=>{const seen=Date.now();await pool.query('UPDATE users SET online=false,last_seen=$1 WHERE id=$2',[seen,u.id]).catch(()=>{});io.emit('presence',{userId:u.id,online:false,lastSeen:seen});});
