@@ -620,4 +620,25 @@ setTimeout(()=>{if(token&&user)syncShopState()},0);
   line-height:15px!important;
   margin:2px 0 0!important;
 }
+
+@media(max-width:520px){
+  .call-panel.minimized .call-box{
+    padding-left:8px!important;
+    padding-right:6px!important;
+    gap:6px!important;
+  }
+  .call-panel.minimized .call-avatar{
+    transform:translateY(1px)!important;
+  }
+  .call-panel.minimized .call-info{
+    transform:translateY(1px)!important;
+    padding-left:1px!important;
+  }
+  .call-panel.minimized .call-actions{
+    transform:translateY(1px)!important;
+  }
+  .call-panel.minimized .call-minimize{
+    transform:translateY(1px)!important;
+  }
+}
 </style>
