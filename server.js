@@ -937,7 +937,7 @@ io.on('connection',async socket=>{
   io.emit('presence',{userId:u.id,online:true,lastSeen:null});
   socket.on('call:offer',d=>{
     if(!d?.to||!d?.offer)return;
-    io.to(String(d.to)).emit('call:offer',{from:u.id,offer:d.offer});
+    io.to(String(d.to)).emit('call:offer',{from:u.id,fromUser:publicUser(u),offer:d.offer});
     sendPushToUser(String(d.to),{
       type:'incoming_call',
       title:'📞 Входящий звонок',
