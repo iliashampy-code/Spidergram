@@ -290,14 +290,6 @@ async function initDb(){
     if(!reset.rowCount) throw new Error('Пользователь @dobry не найден');
     console.log('Пароль @dobry обновлён через DOBRY_RESET_PASSWORD');
   }
-  const founders=await pool.query('SELECT id,title_awards FROM users WHERE created_at < $1',[SPIDERGRAM_2_0_CUTOFF]);
-  for(const f of founders.rows){
-    const awards=parseJson(f.title_awards,[]);
-    if(!awards.includes(FOUNDER_TITLE.name)){
-      awards.push(FOUNDER_TITLE.name);
-      await pool.query('UPDATE users SET title_awards=$1 WHERE id=$2',[JSON.stringify(awards),f.id]);
-    }
-  }
 }
 
 function taskStateFor(u){const x=parseJson(u.task_state,{});return {nightDates:Array.isArray(x.nightDates)?x.nightDates:[],midnightDates:Array.isArray(x.midnightDates)?x.midnightDates:[],groups:Number(x.groups||0),messages:Number(x.messages||0),photos:Number(x.photos||0),voices:Number(x.voices||0),people:Array.isArray(x.people)?x.people:[],sweetDreamVisits:Number(x.sweetDreamVisits||0),claimed:x.claimed&&typeof x.claimed==='object'?x.claimed:{},titles:Array.isArray(x.titles)?x.titles:[],dailyDate:String(x.dailyDate||''),dailyTasks:Array.isArray(x.dailyTasks)?x.dailyTasks:[],dailyProgress:x.dailyProgress&&typeof x.dailyProgress==='object'?x.dailyProgress:{}};}
