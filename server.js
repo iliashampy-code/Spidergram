@@ -327,11 +327,11 @@ async function applyActivity(uid,event,localDate,localHour,extra={}){
  if(consecutive>=3)addTitle('unstoppable');
  if(st.nightDates.length>=1)addTitle('night_spider');
  if(st.groups>=5)addTitle('big_boss');
- if(st.people.length>=10)addTitle('friendly');
+ if(st.people.length>=5)addTitle('friendly');
  if(st.midnightDates.length>=5)addTitle('nightnik');
  if((event==='message'||event==='message_time')&&hour>=3&&hour<4)addTitle('batman');
  if(st.messages>=100)addTitle('living_legend');
- if(st.people.length>=25)addTitle('love');
+ if(st.people.length>=10)addTitle('love');
  if(st.groups>=10&&st.messages>=100)addTitle('emperor');
 
  // «Коллекционер» считает все полученные достижения/титулы, кроме валютных заданий.
