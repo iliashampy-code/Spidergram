@@ -334,7 +334,9 @@ async function applyActivity(uid,event,localDate,localHour,extra={}){
  else if(event==='message'){st.messages++;changed=true}
  else if(event==='message_time'){changed=true}
 
- const pioneerNotice=(parseJson(u.title_awards,[]).includes(FOUNDER_TITLE.name)&&st.pioneerNoticeShown!==true); if(pioneerNotice){st.pioneerNoticeShown=true;changed=true;}
+ const pioneerNoticeVersion=2;
+ const pioneerNotice=(parseJson(u.title_awards,[]).includes(FOUNDER_TITLE.name)&&Number(st.pioneerNoticeVersion||0)<pioneerNoticeVersion);
+ if(pioneerNotice){st.pioneerNoticeVersion=pioneerNoticeVersion;st.pioneerNoticeShown=true;changed=true;}
  const newTitles=[]; const addTitle=(key)=>{if(!st.titles.includes(key)){st.titles.push(key);newTitles.push(taskTitleRewards.find(x=>x.key===key));changed=true}};
  // Сначала фиксируем нового собеседника, чтобы достижения за количество людей
  // срабатывали в тот же момент, когда достигнут порог.
