@@ -642,6 +642,30 @@ app.delete('/api/saved-messages/:id',auth,async(req,res)=>{
  await pool.query('DELETE FROM saved_messages WHERE user_id=$1 AND (id=$2 OR original_message_id=$2)',[req.user.id,req.params.id]);
  res.json({ok:true});
 });
+app.post('/api/currency/transfer',auth,async(req,res)=>{
+  const fromId=req.user.id;
+  const toId=String(req.body.userId||'').trim();
+  const amount=Math.floor(Number(req.body.amount||0));
+  if(!toId)return res.status(400).json({error:'Выберите пользователя'});
+  if(String(toId)===String(fromId))return res.status(400).json({error:'Нельзя переводить валюту самому себе'});
+  if(!Number.isFinite(amount)||amount<=0)return res.status(400).json({error:'Введите положительное количество SP'});
+  if(amount>100000000)return res.status(400).json({error:'Слишком большая сумма'});
+  const client=await pool.connect();
+  try{
+    await client.query('BEGIN');
+    const sender=(await client.query('SELECT id,currency FROM users WHERE id=$1 FOR UPDATE',[fromId])).rows[0];
+    const recipient=(await client.query('SELECT id,username,name FROM users WHERE id=$1 FOR UPDATE',[toId])).rows[0];
+    if(!recipient){await client.query('ROLLBACK');return res.status(404).json({error:'Пользователь не найден'});}
+    const balance=Number(sender?.currency||0);
+    if(balance<amount){await client.query('ROLLBACK');return res.status(400).json({error:'Недостаточно SP'});}
+    await client.query('UPDATE users SET currency=COALESCE(currency,0)-$1 WHERE id=$2',[amount,fromId]);
+    await client.query('UPDATE users SET currency=COALESCE(currency,0)+$1 WHERE id=$2',[amount,toId]);
+    await client.query('COMMIT');
+    res.json({ok:true,amount,balance:balance-amount,recipient:{id:recipient.id,username:recipient.username,name:recipient.name}});
+  }catch(e){try{await client.query('ROLLBACK')}catch{};res.status(500).json({error:'Не удалось выполнить перевод'});}
+  finally{client.release();}
+});
+
 app.get('/api/users',auth,async(req,res)=>{
   const q=String(req.query.q||'').trim().toLowerCase();
   const r=await pool.query(`SELECT * FROM users WHERE id<>$1 AND ($2='' OR username ILIKE '%'||$2||'%' OR name ILIKE '%'||$2||'%') ORDER BY username LIMIT 50`,[req.user.id,q]);
