@@ -961,7 +961,8 @@ io.on('connection',async socket=>{
       .filter(id=>id!==u.id);
     socket.join(room);
     socket.emit('group-call:participants',{groupId,participants:[...new Set(existing)]});
-    socket.to(room).emit('group-call:joined',{groupId,userId:u.id,user:publicUser(u)});
+    if(existing.length) socket.to(room).emit('group-call:joined',{groupId,userId:u.id,user:publicUser(u)});
+    else socket.emit('group-call:started',{groupId,userId:u.id,user:publicUser(u)});
   });
   socket.on('group-call:offer',async d=>{
     const groupId=String(d?.groupId||''),to=String(d?.to||'');
