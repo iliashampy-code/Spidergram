@@ -562,11 +562,13 @@ setTimeout(()=>{if(token&&user)syncShopState()},0);
  .call-name{font-size:18px}
  .call-actions{gap:8px}
  .call-mute,.call-end,.call-danger,.call-success{width:50px!important;height:50px!important}
- .call-panel.minimized{padding:10px 8px}
- .call-panel.minimized .call-box{grid-template-columns:48px minmax(0,1fr) auto;gap:10px;padding:9px 54px 9px 10px}
- .call-panel.minimized .call-avatar{width:48px;height:48px}
- .call-panel.minimized .call-name{font-size:15px}
- .call-panel.minimized .call-actions{gap:6px}
- .call-panel.minimized .call-mute,.call-panel.minimized .call-end,.call-panel.minimized .call-danger,.call-panel.minimized .call-success{width:42px!important;height:42px!important}
+ .call-panel.minimized{padding:calc(56px + env(safe-area-inset-top,0px)) 8px 10px}
+ .call-panel.minimized .call-box{grid-template-columns:48px minmax(0,1fr) 86px 34px;gap:8px;padding:9px 8px 9px 10px}
+ .call-panel.minimized .call-minimize{position:static;grid-column:4;grid-row:1;width:34px;height:34px;margin:0}
+ .call-panel.minimized .call-avatar{width:48px;height:48px;grid-column:1;grid-row:1}
+ .call-panel.minimized .call-info{grid-column:2;grid-row:1}
+ .call-panel.minimized .call-name{font-size:14px}
+ .call-panel.minimized .call-actions{grid-column:3;grid-row:1;gap:6px}
+ .call-panel.minimized .call-mute,.call-panel.minimized .call-end,.call-panel.minimized .call-danger,.call-panel.minimized .call-success{width:39px!important;height:39px!important;flex-basis:39px}
 }
 </style>
