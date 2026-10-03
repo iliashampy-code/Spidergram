@@ -961,8 +961,12 @@ io.on('connection',async socket=>{
       .filter(id=>id!==u.id);
     socket.join(room);
     socket.emit('group-call:participants',{groupId,participants:[...new Set(existing)]});
-    if(existing.length) socket.to(room).emit('group-call:joined',{groupId,userId:u.id,user:publicUser(u)});
-    else socket.emit('group-call:started',{groupId,userId:u.id,user:publicUser(u)});
+    if(existing.length){
+      socket.to(room).emit('group-call:joined',{groupId,userId:u.id,user:publicUser(u)});
+    }else{
+      const members=await pool.query('SELECT user_id FROM group_members WHERE group_id=$1',[groupId]);
+      for(const m of members.rows)if(m.user_id!==u.id)io.to(m.user_id).emit('group-call:started',{groupId,userId:u.id,user:publicUser(u)});
+    }
   });
   socket.on('group-call:offer',async d=>{
     const groupId=String(d?.groupId||''),to=String(d?.to||'');
