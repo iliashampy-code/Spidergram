@@ -280,6 +280,7 @@ async function initDb(){
       const awards=parseJson(pioneer.title_awards,[]);
       if(!awards.includes(FOUNDER_TITLE.name))awards.push(FOUNDER_TITLE.name);
       state.pioneerGrant=true;
+      state.pioneerNoticeShown=false;
       await pool.query('UPDATE users SET title_awards=$1,currency=COALESCE(currency,0)+450,task_state=$2 WHERE id=$3',[JSON.stringify(awards),JSON.stringify(state),pioneer.id]);
     }
   }
@@ -328,6 +329,7 @@ async function applyActivity(uid,event,localDate,localHour,extra={}){
  else if(event==='message'){st.messages++;changed=true}
  else if(event==='message_time'){changed=true}
 
+ const pioneerNotice=(parseJson(u.title_awards,[]).includes(FOUNDER_TITLE.name)&&st.pioneerNoticeShown!==true); if(pioneerNotice){st.pioneerNoticeShown=true;changed=true;}
  const newTitles=[]; const addTitle=(key)=>{if(!st.titles.includes(key)){st.titles.push(key);newTitles.push(taskTitleRewards.find(x=>x.key===key));changed=true}};
  // Сначала фиксируем нового собеседника, чтобы достижения за количество людей
  // срабатывали в тот же момент, когда достигнут порог.
@@ -376,7 +378,7 @@ async function applyActivity(uid,event,localDate,localHour,extra={}){
  if(currencyEarned)await pool.query('UPDATE users SET currency=currency+$1 WHERE id=$2',[currencyEarned,uid]);
  if(newTitles.length){for(const t of newTitles){if(t&&!awards.includes(t.name))awards.push(t.name)}await pool.query('UPDATE users SET title_awards=$1 WHERE id=$2',[JSON.stringify(awards),uid]);}
  if(changed)await pool.query('UPDATE users SET task_state=$1 WHERE id=$2',[JSON.stringify(st),uid]);
- return {newTitles:newTitles.filter(Boolean),currencyEarned};
+ return {newTitles:newTitles.filter(Boolean),currencyEarned,pioneerNotice};
 }
 async function getUser(uid){
   const r=await pool.query('SELECT * FROM users WHERE id=$1',[uid]);
