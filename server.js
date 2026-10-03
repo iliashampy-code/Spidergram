@@ -929,8 +929,9 @@ io.on('connection',async socket=>{
   socket.on('disconnect',async()=>{const seen=Date.now();await pool.query('UPDATE users SET online=false,last_seen=$1 WHERE id=$2',[seen,u.id]).catch(()=>{});io.emit('presence',{userId:u.id,online:false,lastSeen:seen});});
 });
 
-app.get('/',(req,res)=>res.sendFile(path.join(ROOT,'index.html')));
-app.get('/index.html',(req,res)=>res.sendFile(path.join(ROOT,'index.html')));
+app.get('/',(req,res)=>{res.set('Cache-Control','no-store, no-cache, must-revalidate, proxy-revalidate');res.set('Pragma','no-cache');res.set('Expires','0');res.sendFile(path.join(ROOT,'index.html'));});
+app.get('/index.html',(req,res)=>{res.set('Cache-Control','no-store, no-cache, must-revalidate, proxy-revalidate');res.set('Pragma','no-cache');res.set('Expires','0');res.sendFile(path.join(ROOT,'index.html'));});
+
 app.get('/download',(req,res)=>res.sendFile(path.join(ROOT,'download.html')));
 app.get('/downloads/SpiderGram.apk',(req,res)=>res.download(path.join(ROOT,'downloads','SpiderGram.apk'),'SpiderGram.apk',err=>{if(err&&!res.headersSent)res.status(404).send('APK пока не собран. Попробуйте немного позже.');}));
 
