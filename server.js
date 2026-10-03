@@ -276,12 +276,17 @@ async function initDb(){
   const pioneerUsers=await pool.query('SELECT id,created_at,title_awards,currency,task_state FROM users WHERE created_at>0 AND created_at<=$1',[PIONEER_GRANT_CUTOFF]);
   for(const pioneer of pioneerUsers.rows){
     const state=parseJson(pioneer.task_state,{});
-    if(state&&typeof state==='object'&&!Array.isArray(state)&&!state.pioneerGrant){
-      const awards=parseJson(pioneer.title_awards,[]);
-      if(!awards.includes(FOUNDER_TITLE.name))awards.push(FOUNDER_TITLE.name);
+    if(!state||typeof state!=='object'||Array.isArray(state))continue;
+    const awards=parseJson(pioneer.title_awards,[]);
+    const hasPioneer=awards.includes(FOUNDER_TITLE.name);
+    if(!hasPioneer){
+      awards.push(FOUNDER_TITLE.name);
       state.pioneerGrant=true;
       state.pioneerNoticeShown=false;
       await pool.query('UPDATE users SET title_awards=$1,currency=COALESCE(currency,0)+450,task_state=$2 WHERE id=$3',[JSON.stringify(awards),JSON.stringify(state),pioneer.id]);
+    }else if(state.pioneerNoticeShown===undefined){
+      state.pioneerNoticeShown=false;
+      await pool.query('UPDATE users SET task_state=$1 WHERE id=$2',[JSON.stringify(state),pioneer.id]);
     }
   }
   const pushCfg=await pool.query('SELECT * FROM push_config WHERE id=1');
