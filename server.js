@@ -308,7 +308,7 @@ async function initDb(){
   }
 }
 
-function taskStateFor(u){const x=parseJson(u.task_state,{});return {nightDates:Array.isArray(x.nightDates)?x.nightDates:[],midnightDates:Array.isArray(x.midnightDates)?x.midnightDates:[],groups:Number(x.groups||0),messages:Number(x.messages||0),photos:Number(x.photos||0),voices:Number(x.voices||0),people:Array.isArray(x.people)?x.people:[],sweetDreamVisits:Number(x.sweetDreamVisits||0),claimed:x.claimed&&typeof x.claimed==='object'?x.claimed:{},titles:Array.isArray(x.titles)?x.titles:[],dailyDate:String(x.dailyDate||''),dailyTasks:Array.isArray(x.dailyTasks)?x.dailyTasks:[],dailyProgress:x.dailyProgress&&typeof x.dailyProgress==='object'?x.dailyProgress:{}};}
+function taskStateFor(u){const x=parseJson(u.task_state,{});return {nightDates:Array.isArray(x.nightDates)?x.nightDates:[],midnightDates:Array.isArray(x.midnightDates)?x.midnightDates:[],groups:Number(x.groups||0),messages:Number(x.messages||0),photos:Number(x.photos||0),voices:Number(x.voices||0),people:Array.isArray(x.people)?x.people:[],sweetDreamVisits:Number(x.sweetDreamVisits||0),claimed:x.claimed&&typeof x.claimed==='object'?x.claimed:{},titles:Array.isArray(x.titles)?x.titles:[],dailyDate:String(x.dailyDate||''),dailyTasks:Array.isArray(x.dailyTasks)?x.dailyTasks:[],dailyProgress:x.dailyProgress&&typeof x.dailyProgress==='object'?x.dailyProgress:{},pioneerNoticeVersion:Number(x.pioneerNoticeVersion||0)};}
 const DAILY_CURRENCY_TASK_POOL=[
  {id:'daily_messages10',name:'Отправить 10 сообщений',event:'message',target:10,reward:20},
  {id:'daily_people3',name:'Написать 3 разным людям',event:'people',target:3,reward:30},
