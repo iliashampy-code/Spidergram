@@ -578,4 +578,46 @@ setTimeout(()=>{if(token&&user)syncShopState()},0);
 .call-panel.minimized .call-minimize svg{transform:rotate(0deg)!important}
 .call-panel.minimized{padding-top:calc(70px + env(safe-area-inset-top,0px))!important}
 .call-panel.minimized .call-box{height:68px!important;min-height:68px!important}
+
+.call-panel.minimized .call-box{
+  transform:none!important;
+  rotate:0deg!important;
+  skew:0deg!important;
+  align-items:center!important;
+  box-sizing:border-box!important;
+  overflow:hidden!important;
+}
+.call-panel.minimized .call-avatar,
+.call-panel.minimized .call-info,
+.call-panel.minimized .call-actions,
+.call-panel.minimized .call-minimize{
+  transform:none!important;
+  rotate:0deg!important;
+  align-self:center!important;
+}
+.call-panel.minimized .call-info{
+  justify-content:center!important;
+  min-height:44px!important;
+}
+.call-panel.minimized .call-actions{
+  height:100%!important;
+  justify-content:center!important;
+  align-items:center!important;
+}
+.call-panel.minimized .call-minimize{
+  display:grid!important;
+  place-items:center!important;
+  padding:0!important;
+}
+.call-panel.minimized .call-minimize svg{
+  margin:0!important;
+}
+.call-panel.minimized .call-name{
+  line-height:18px!important;
+  margin:0!important;
+}
+.call-panel.minimized .call-status{
+  line-height:15px!important;
+  margin:2px 0 0!important;
+}
 </style>
