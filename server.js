@@ -315,6 +315,12 @@ async function applyActivity(uid,event,localDate,localHour,extra={}){
  else if(event==='message_time'){changed=true}
 
  const newTitles=[]; const addTitle=(key)=>{if(!st.titles.includes(key)){st.titles.push(key);newTitles.push(taskTitleRewards.find(x=>x.key===key));changed=true}};
+ // Сначала фиксируем нового собеседника, чтобы достижения за количество людей
+ // срабатывали в тот же момент, когда достигнут порог.
+ if(extra.peerId&&event==='message'){
+   const pid=String(extra.peerId);
+   if(pid&&pid!==uid&&!st.people.includes(pid)){st.people.push(pid);st.people=st.people.slice(-200);changed=true;}
+ }
  const previousVisitDates=st.claimed._visitDates&&Array.isArray(st.claimed._visitDates)?st.claimed._visitDates:[];
  if(event==='visit'&&!previousVisitDates.includes(date)){previousVisitDates.push(date);st.claimed._visitDates=previousVisitDates.slice(-60);changed=true;}
  let consecutive=0;if(previousVisitDates.length){const ds=[...previousVisitDates].sort().reverse();consecutive=1;for(let i=1;i<ds.length;i++){const a=new Date(ds[i-1]+'T12:00:00'),b=new Date(ds[i]+'T12:00:00');if(Math.round((a-b)/86400000)===1)consecutive++;else break;}}
@@ -350,7 +356,6 @@ async function applyActivity(uid,event,localDate,localHour,extra={}){
  reward('photos10',st.photos>=10,80);
  reward('voices10',st.voices>=10,80);
  reward('people15',st.people.length>=15,100);
- if(extra.peerId&&event==='message'){const pid=String(extra.peerId);if(pid&&pid!==uid&&!st.people.includes(pid)){st.people.push(pid);st.people=st.people.slice(-200);changed=true;}}
  const dailyEvent=event==='message'?'message':event==='photo'?'photo':event==='voice'?'voice':event==='group'?'group':event==='favorite'?'favorite':null;
  if(dailyEvent){for(const taskId of st.dailyTasks){const task=DAILY_CURRENCY_TASK_POOL.find(x=>x.id===taskId);if(!task)continue;let inc=task.event===dailyEvent?1:0;if(task.event==='people'&&event==='message'&&extra.peerId)inc=st.people.includes(String(extra.peerId))?1:0;if(!inc)continue;st.dailyProgress[taskId]=Math.min(task.target,Number(st.dailyProgress[taskId]||0)+inc);changed=true;if(st.dailyProgress[taskId]>=task.target&&!st.claimed['daily_'+date+'_'+taskId]){st.claimed['daily_'+date+'_'+taskId]=true;currencyEarned+=task.reward;}}}
  if(currencyEarned)await pool.query('UPDATE users SET currency=currency+$1 WHERE id=$2',[currencyEarned,uid]);
