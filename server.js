@@ -331,6 +331,9 @@ async function applyActivity(uid,event,localDate,localHour,extra={}){
  // «Коллекционер» считает все полученные достижения/титулы, кроме валютных заданий.
  // В том числе считаются титулы за дни и все task-title achievements.
  const days=Math.max(0,Math.floor((Date.now()-Number(u.created_at||Date.now()))/86400000));
+ let awards=parseJson(u.title_awards,[]);
+ const unlockedDayTitles=rewardForDays(days).filter(r=>r.type==='title'&&days>=r.days);
+ for(const r of unlockedDayTitles){if(!awards.includes(r.name)){awards.push(r.name);newTitles.push(r);changed=true;}}
  const timeAchievements=rewardForDays(days).filter(r=>r.type==='title'&&days>=r.days).length;
  const taskAchievements=st.titles.filter(x=>!['collector'].includes(x)).length;
  const collectorCount=timeAchievements+taskAchievements;
@@ -351,7 +354,7 @@ async function applyActivity(uid,event,localDate,localHour,extra={}){
  const dailyEvent=event==='message'?'message':event==='photo'?'photo':event==='voice'?'voice':event==='group'?'group':event==='favorite'?'favorite':null;
  if(dailyEvent){for(const taskId of st.dailyTasks){const task=DAILY_CURRENCY_TASK_POOL.find(x=>x.id===taskId);if(!task)continue;let inc=task.event===dailyEvent?1:0;if(task.event==='people'&&event==='message'&&extra.peerId)inc=st.people.includes(String(extra.peerId))?1:0;if(!inc)continue;st.dailyProgress[taskId]=Math.min(task.target,Number(st.dailyProgress[taskId]||0)+inc);changed=true;if(st.dailyProgress[taskId]>=task.target&&!st.claimed['daily_'+date+'_'+taskId]){st.claimed['daily_'+date+'_'+taskId]=true;currencyEarned+=task.reward;}}}
  if(currencyEarned)await pool.query('UPDATE users SET currency=currency+$1 WHERE id=$2',[currencyEarned,uid]);
- if(newTitles.length){let awards=parseJson(u.title_awards,[]);for(const t of newTitles){if(t&&!awards.includes(t.name))awards.push(t.name)}await pool.query('UPDATE users SET title_awards=$1 WHERE id=$2',[JSON.stringify(awards),uid]);}
+ if(newTitles.length){for(const t of newTitles){if(t&&!awards.includes(t.name))awards.push(t.name)}await pool.query('UPDATE users SET title_awards=$1 WHERE id=$2',[JSON.stringify(awards),uid]);}
  if(changed)await pool.query('UPDATE users SET task_state=$1 WHERE id=$2',[JSON.stringify(st),uid]);
  return {newTitles:newTitles.filter(Boolean),currencyEarned};
 }
@@ -525,7 +528,7 @@ app.post('/api/promo/redeem',auth,async(req,res)=>{
  }catch(e){await pool.query('ROLLBACK');throw e}
 });
 app.patch('/api/admin/users/:id/custom-color',auth,async(req,res)=>{const admin=await requireOwnerAdmin(req,res);if(!admin)return;const target=await getUser(req.params.id);if(!target)return res.status(404).json({error:'Пользователь не найден'});const enabled=req.body.enabled!==false;const r=await pool.query('UPDATE users SET custom_color_enabled=$1 WHERE id=$2 RETURNING *',[enabled,target.id]);res.json(publicUser(r.rows[0]));});
-app.patch('/api/admin/users/:id/currency',auth,async(req,res)=>{const admin=await requireOwnerAdmin(req,res);if(!admin)return;const target=await getUser(req.params.id);if(!target)return res.status(404).json({error:'Пользователь не найден'});const amount=Math.floor(Number(req.body.amount));if(!Number.isFinite(amount)||amount<=0||amount>1000000)return res.status(400).json({error:'Введите сумму от 1 до 1 000 000 SP'});const r=await pool.query('UPDATE users SET currency=currency+$1 WHERE id=$2 RETURNING currency',[amount,target.id]);io.to(target.id).emit('currency:notify',{amount});res.json({ok:true,currency:Number(r.rows[0].currency||0)});});
+app.patch('/api/admin/users/:id/currency',auth,async(req,res)=>{const admin=await requireOwnerAdmin(req,res);if(!admin)return;const target=await getUser(req.params.id);if(!target)return res.status(404).json({error:'Пользователь не найден'});const amount=Math.floor(Number(req.body.amount));if(!Number.isSafeInteger(amount)||amount<=0||amount>1000000)return res.status(400).json({error:'Введите сумму от 1 до 1 000 000 SP'});const r=await pool.query('UPDATE users SET currency=COALESCE(currency,0)+$1 WHERE id=$2 RETURNING currency',[amount,target.id]);const balance=Number(r.rows[0].currency||0);io.to(target.id).emit('currency:notify',{amount,balance});res.json({ok:true,amount,currency:balance});});
 app.patch('/api/admin/users/:id/currency/reset',auth,async(req,res)=>{const admin=await requireOwnerAdmin(req,res);if(!admin)return;const target=await getUser(req.params.id);if(!target)return res.status(404).json({error:'Пользователь не найден'});const r=await pool.query('UPDATE users SET currency=0 WHERE id=$1 RETURNING currency',[target.id]);res.json({ok:true,currency:Number(r.rows[0].currency||0)});});
 app.patch('/api/admin/users/:id/shop/reset',auth,async(req,res)=>{const admin=await requireOwnerAdmin(req,res);if(!admin)return;const target=await getUser(req.params.id);if(!target)return res.status(404).json({error:'Пользователь не найден'});const paidTitleValues=shopItems.filter(x=>x.type==='title').map(x=>x.value);let awards=parseJson(target.title_awards,[]);awards=awards.filter(x=>!paidTitleValues.includes(x));let selected=String(target.selected_title||'');if(paidTitleValues.includes(selected))selected='';await pool.query('UPDATE users SET shop_owned=$1,shop_equipped=$2,title_awards=$3,selected_title=$4 WHERE id=$5',['[]','{}',JSON.stringify(awards),selected,target.id]);io.to(target.id).emit('shop:reset');res.json({ok:true});});
 
