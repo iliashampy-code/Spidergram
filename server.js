@@ -807,8 +807,17 @@ app.post('/api/polls/:id/vote',auth,async(req,res)=>{
  selected=[...new Set(selected.filter(x=>Number.isInteger(x)&&x>=0&&x<p.options.length))];
  if(!selected.length)return res.status(400).json({error:'Выбери вариант'});
  if(p.multiple!==true&&selected.length>1)selected=selected.slice(0,1);
- await pool.query('DELETE FROM poll_votes WHERE message_id=$1 AND user_id=$2',[m.id,req.user.id]);
- for(const oi of selected)await pool.query('INSERT INTO poll_votes(message_id,user_id,option_index,voted_at) VALUES($1,$2,$3,$4)',[m.id,req.user.id,oi,Date.now()]);
+ const client=await pool.connect();
+ try{
+  await client.query('BEGIN');
+  await client.query('DELETE FROM poll_votes WHERE message_id=$1 AND user_id=$2',[m.id,req.user.id]);
+  for(const oi of selected)await client.query('INSERT INTO poll_votes(message_id,user_id,option_index,voted_at) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING',[m.id,req.user.id,oi,Date.now()]);
+  await client.query('COMMIT');
+ }catch(err){
+  try{await client.query('ROLLBACK')}catch{}
+  console.error('Poll vote failed:',err?.message||err);
+  return res.status(500).json({error:'Не удалось сохранить голос. Попробуйте ещё раз.'});
+ }finally{client.release()}
  res.json(await pollForMessage(m.id,p,req.user.id));
 });
 app.get('/api/groups/:id/messages',auth,async(req,res)=>{
