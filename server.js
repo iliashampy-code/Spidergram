@@ -500,13 +500,11 @@ app.patch('/api/me/title',auth,async(req,res)=>{
   const title=String(req.body.title||'').trim().slice(0,60);
   if(title){
     const days=Math.max(0,Math.floor((Date.now()-Number(u.created_at||Date.now()))/86400000));
-    const allowed=rewardForDays(days).find(x=>x.type==='title'&&x.name===title);let awards=[];try{awards=JSON.parse(u.title_awards||'[]')}catch{}
-    const founderEligible=title===FOUNDER_TITLE.name&&awards.includes(title);
-    if(!allowed&&!awards.includes(title)&&!founderEligible)return res.status(400).json({error:'Этот титул ещё не открыт'});
-    if(founderEligible&&!awards.includes(title)){
-      awards.push(title);
-      await pool.query('UPDATE users SET title_awards=$1 WHERE id=$2',[JSON.stringify(awards),u.id]);
-    }
+    const allowed=rewardForDays(days).find(x=>x.type==='title'&&x.name===title);
+    const awards=parseJson(u.title_awards,[]);
+    const owned=parseJson(u.shop_owned,[]);
+    const shopTitle=shopItems.find(x=>x.type==='title'&&x.value===title&&owned.includes(x.id));
+    if(!allowed&&!awards.includes(title)&&!shopTitle)return res.status(400).json({error:'Этот титул ещё не открыт'});
   }
   const r=await pool.query('UPDATE users SET selected_title=$1 WHERE id=$2 RETURNING *',[title,u.id]);
   res.json(publicUser(r.rows[0]));
