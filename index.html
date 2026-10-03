@@ -275,9 +275,24 @@ function pollHtml(m){
 function refreshPollTimers(){document.querySelectorAll("[id^=poll-time-]").forEach(el=>{const id=el.id.slice(10),p=pollMessageCache[id]?.poll;if(p)el.textContent=pollTimeLabel(p.endsAt)})}
 setInterval(refreshPollTimers,1000);
 function messageHtml(m){if(m.deleted||m.type==="deleted")return"";if(m.type==="poll")pollMessageCache[m.id]=m;let body=m.type==="poll"?pollHtml(m):m.type==="image"?'<img onclick="event.stopPropagation()" src="'+esc(m.mediaUrl)+'" alt="Фото">':m.type==="video"?'<video onclick="event.stopPropagation()" controls playsinline style="max-width:100%;max-height:420px;border-radius:11px" src="'+esc(m.mediaUrl)+'"></video>':m.type==="audio"?'<audio onclick="event.stopPropagation()" controls src="'+esc(m.mediaUrl)+'"></audio>':esc(m.text);return '<div id="msg-'+m.id+'" class="bubble '+(m.from===user.id?"me":"")+'" data-msg-id="'+esc(m.id)+'" data-msg-text="'+esc(m.text||"")+'" onclick="messageActions(event,this.dataset.msgId,this.dataset.msgText,this.classList.contains(\'me\'))">'+body+(m.edited&&!m.deleted?" <small>(изменено)</small>":"")+'<div class=meta>'+new Date(m.createdAt).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})+(m.from===user.id&&m.read?' <span class="read-status">· прочитано</span>':"")+'</div>'+(m.reactions?.length?'<div class=reactions>'+m.reactions.map(r=>'<span class=reaction>'+esc(r.emoji)+'</span>').join("")+'</div>':"")+'</div>'}
-function votePoll(id,index,multiple){const m=pollMessageCache[id],p=m?.poll;if(!p)return;if(p.endsAt&&Date.now()>=Number(p.endsAt))return;if(multiple){p._selected=p._selected||new Set(p.mine||[]);if(p._selected.has(index))p._selected.delete(index);else p._selected.add(index);pollMessageCache[id].poll={...p,mine:[...p._selected]};replaceMessage(pollMessageCache[id]);return}submitPollVote(id,[index])}
-async function submitPollVote(id,selected){try{const r=await api("/api/polls/"+encodeURIComponent(id)+"/vote",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({optionIndexes:selected})});const m=pollMessageCache[id];pollMessageCache[id]={...m,poll:r};replaceMessage(pollMessageCache[id])}catch(e){alert(e.message)}}
-function submitPollSelection(id){const p=pollMessageCache[id]?.poll;if(!p)return;const selected=p._selected?[...p._selected]:(p.mine||[]);if(!selected.length)return alert("Выбери вариант");submitPollVote(id,selected)}
+function votePoll(id,index,multiple){const m=pollMessageCache[id],p=m?.poll;if(!p||p._voting)return;if(p.endsAt&&Date.now()>=Number(p.endsAt))return;if(multiple){p._selected=p._selected instanceof Set?p._selected:new Set(p.mine||[]);if(p._selected.has(index))p._selected.delete(index);else p._selected.add(index);pollMessageCache[id].poll={...p,mine:[...p._selected]};replaceMessage(pollMessageCache[id]);return}submitPollVote(id,[index])}
+async function submitPollVote(id,selected){
+ const m=pollMessageCache[id],p=m?.poll;if(!m||!p||p._voting)return;
+ const clean=[...new Set((Array.isArray(selected)?selected:[]).map(Number).filter(Number.isInteger))];
+ if(!clean.length)return alert("Выбери вариант");
+ if(p.endsAt&&Date.now()>=Number(p.endsAt))return;
+ p._voting=true;
+ try{
+  const r=await api("/api/polls/"+encodeURIComponent(id)+"/vote",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({optionIndexes:clean})});
+  delete r._voting;delete r._selected;
+  pollMessageCache[id]={...m,poll:r};
+  replaceMessage(pollMessageCache[id]);
+ }catch(e){
+  p._voting=false;
+  alert(e?.message||"Не удалось проголосовать. Попробуй ещё раз.");
+ }
+}
+function submitPollSelection(id){const p=pollMessageCache[id]?.poll;if(!p)return;const selected=p._selected instanceof Set?[...p._selected]:(p.mine||[]);if(!selected.length)return alert("Выбери вариант");submitPollVote(id,selected)}
 
 
 
