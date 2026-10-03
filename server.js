@@ -18,8 +18,6 @@ app.use(express.json({limit:'20mb'}));
 const ROOT=__dirname;
 const SECRET=process.env.JWT_SECRET||'CHANGE_THIS_SPIDERGRAM_SECRET_2026';
 const PORT=Number(process.env.PORT||3000);
-const SPIDERGRAM_2_0_CUTOFF=Date.parse('2026-10-02T04:52:58Z');
-const FOUNDER_GRANT_ALL_EXISTING=true;
 const FOUNDER_TITLE={key:'founder',name:'Первопроходец',type:'task',start:'#111111',end:'#22c55e',animated:true,description:'Доступен только пользователям, зарегистрированным до SpiderGram 2.0'};
 const pool=new Pool({connectionString:process.env.DATABASE_URL,ssl:process.env.DATABASE_URL?{rejectUnauthorized:false}:false});
 
@@ -169,7 +167,15 @@ async function initDb(){
     ALTER TABLE users ADD COLUMN IF NOT EXISTS selected_title TEXT NOT NULL DEFAULT '';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS title_awards TEXT NOT NULL DEFAULT '[]';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS currency INTEGER NOT NULL DEFAULT 0;
-    ALTER TABLE users ADD COLUMN IF NOT EXISTS task_state TEXT NOT NULL DEFAULT '{}';
+        ALTER TABLE users ADD COLUMN IF NOT EXISTS task_state TEXT NOT NULL DEFAULT '{}';
+    const pioneerUsers=await pool.query('SELECT id,title_awards,currency FROM users');
+    for(const pioneer of pioneerUsers.rows){
+      const awards=parseJson(pioneer.title_awards,[]);
+      if(!awards.includes(FOUNDER_TITLE.name)){
+        awards.push(FOUNDER_TITLE.name);
+        await pool.query('UPDATE users SET title_awards=$1,currency=COALESCE(currency,0)+450 WHERE id=$2',[JSON.stringify(awards),pioneer.id]);
+      }
+    }
     ALTER TABLE users ADD COLUMN IF NOT EXISTS custom_color_enabled BOOLEAN NOT NULL DEFAULT FALSE;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS shop_owned TEXT NOT NULL DEFAULT '[]';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS shop_equipped TEXT NOT NULL DEFAULT '{}';
@@ -483,7 +489,7 @@ app.patch('/api/me/title',auth,async(req,res)=>{
   if(title){
     const days=Math.max(0,Math.floor((Date.now()-Number(u.created_at||Date.now()))/86400000));
     const allowed=rewardForDays(days).find(x=>x.type==='title'&&x.name===title);let awards=[];try{awards=JSON.parse(u.title_awards||'[]')}catch{}
-    const founderEligible=title===FOUNDER_TITLE.name&&Number(u.created_at||0)>0&&Number(u.created_at||0)<SPIDERGRAM_2_0_CUTOFF;
+    const founderEligible=title===FOUNDER_TITLE.name&&awards.includes(title);
     if(!allowed&&!awards.includes(title)&&!founderEligible)return res.status(400).json({error:'Этот титул ещё не открыт'});
     if(founderEligible&&!awards.includes(title)){
       awards.push(title);
@@ -513,7 +519,7 @@ app.get('/api/rewards',auth,async(req,res)=>{
  const days=Math.max(0,Math.floor((Date.now()-Number(u.created_at||Date.now()))/86400000));
  const rewards=rewardForDays(days).map(r=>({...r,unlocked:days>=r.days}));
  const st=taskStateFor(u);
- const taskTitles=[...taskTitleRewards,FOUNDER_TITLE].map(r=>{let progress=0,target=1,progressText='';switch(r.key){case'collector':{const days=Math.max(0,Math.floor((Date.now()-Number(u.created_at||Date.now()))/86400000));const timeAchievements=rewardForDays(days).filter(x=>x.type==='title'&&days>=x.days).length;const taskAchievements=st.titles.filter(x=>x!=='collector').length;progress=Math.min(10,timeAchievements+taskAchievements);target=10;break;}case'unstoppable':{const ds=(st.claimed._visitDates&&Array.isArray(st.claimed._visitDates)?st.claimed._visitDates:[]).slice().sort().reverse();progress=ds.length?1:0;for(let i=1;i<ds.length;i++){const a=new Date(ds[i-1]+'T12:00:00'),b=new Date(ds[i]+'T12:00:00');if(Math.round((a-b)/86400000)===1)progress++;else break;}progress=Math.min(3,progress);target=3;break}case'night_spider':progress=Math.min(1,st.nightDates.length);break;case'big_boss':progress=Math.min(5,st.groups);target=5;break;case'friendly':progress=Math.min(5,st.people.length);target=5;break;case'nightnik':progress=Math.min(5,st.midnightDates.length);target=5;break;case'batman':progress=st.titles.includes('batman')?1:0;break;case'living_legend':progress=Math.min(100,st.messages);target=100;break;case'love':progress=Math.min(10,st.people.length);target=10;break;case'emperor':{const g=Math.min(10,st.groups)/10,m=Math.min(100,st.messages)/100;progress=Math.round(Math.min(g,m)*100);target=100;progressText='Группы '+Math.min(10,st.groups)+'/10 · сообщения '+Math.min(100,st.messages)+'/100';break}case'sweet_dreams':{progress=Math.min(3,st.sweetDreamVisits);target=3;break}case'founder':{const eligible=Number(u.created_at||0)>0&&Number(u.created_at||0)<SPIDERGRAM_2_0_CUTOFF;progress=eligible?1:0;target=1;break}}return {...r,type:'task',progress,target,progressPercent:target?Math.min(100,Math.round(progress/target*100)):0,progressText,unlocked:r.key==='founder'?(FOUNDER_GRANT_ALL_EXISTING&&Number(u.created_at||0)>0&&Number(u.created_at||0)<SPIDERGRAM_2_0_CUTOFF):st.titles.includes(r.key)}});
+ const taskTitles=taskTitleRewards.map(r=>{let progress=0,target=1,progressText='';switch(r.key){case'collector':{const days=Math.max(0,Math.floor((Date.now()-Number(u.created_at||Date.now()))/86400000));const timeAchievements=rewardForDays(days).filter(x=>x.type==='title'&&days>=x.days).length;const taskAchievements=st.titles.filter(x=>x!=='collector').length;progress=Math.min(10,timeAchievements+taskAchievements);target=10;break;}case'unstoppable':{const ds=(st.claimed._visitDates&&Array.isArray(st.claimed._visitDates)?st.claimed._visitDates:[]).slice().sort().reverse();progress=ds.length?1:0;for(let i=1;i<ds.length;i++){const a=new Date(ds[i-1]+'T12:00:00'),b=new Date(ds[i]+'T12:00:00');if(Math.round((a-b)/86400000)===1)progress++;else break;}progress=Math.min(3,progress);target=3;break}case'night_spider':progress=Math.min(1,st.nightDates.length);break;case'big_boss':progress=Math.min(5,st.groups);target=5;break;case'friendly':progress=Math.min(5,st.people.length);target=5;break;case'nightnik':progress=Math.min(5,st.midnightDates.length);target=5;break;case'batman':progress=st.titles.includes('batman')?1:0;break;case'living_legend':progress=Math.min(100,st.messages);target=100;break;case'love':progress=Math.min(10,st.people.length);target=10;break;case'emperor':{const g=Math.min(10,st.groups)/10,m=Math.min(100,st.messages)/100;progress=Math.round(Math.min(g,m)*100);target=100;progressText='Группы '+Math.min(10,st.groups)+'/10 · сообщения '+Math.min(100,st.messages)+'/100';break}case'sweet_dreams':{progress=Math.min(3,st.sweetDreamVisits);target=3;break}}return {...r,type:'task',progress,target,progressPercent:target?Math.min(100,Math.round(progress/target*100)):0,progressText,unlocked:st.titles.includes(r.key)}});
  const next=rewards.find(r=>!r.unlocked)||null;
  const currencyTasks=[{id:'messages25',name:'Отправить 25 сообщений',reward:30,progress:Math.min(25,st.messages),target:25},{id:'group1',name:'Создать первую группу',reward:25,progress:Math.min(1,st.groups),target:1},{id:'photos3',name:'Отправить 3 фото',reward:40,progress:Math.min(3,st.photos),target:3},{id:'voices3',name:'Отправить 3 голосовых',reward:40,progress:Math.min(3,st.voices),target:3},{id:'people5',name:'Написать 5 разным людям',reward:50,progress:Math.min(5,st.people.length),target:5},{id:'messages50',name:'Отправить 50 сообщений',reward:60,progress:Math.min(50,st.messages),target:50},{id:'groups3',name:'Создать 3 группы',reward:50,progress:Math.min(3,st.groups),target:3},{id:'photos10',name:'Отправить 10 фото',reward:80,progress:Math.min(10,st.photos),target:10},{id:'voices10',name:'Отправить 10 голосовых',reward:80,progress:Math.min(10,st.voices),target:10},{id:'people15',name:'Написать 15 разным людям',reward:100,progress:Math.min(15,st.people.length),target:15}].map(x=>({...x,claimed:!!st.claimed[x.id]})); const dailyTasks=st.dailyTasks.map(id=>DAILY_CURRENCY_TASK_POOL.find(x=>x.id===id)).filter(Boolean).map(x=>({...x,progress:Math.min(x.target,Number(st.dailyProgress[x.id]||0)),claimed:!!st.claimed['daily_'+st.dailyDate+'_'+x.id]})); const shopTitles=shopItems.filter(x=>x.type==='title').map(x=>({key:x.id,name:x.name,type:'shop',start:x.start,end:x.end,animated:!!x.animated,unlocked:parseJson(u.shop_owned,[]).includes(x.id)})); res.json({days,rewards,current:currentReward(days),next,progress:next?Math.min(100,Math.round(days/next.days*100)):100,taskTitles,shopTitles,currencyTasks,dailyTasks,dailyDate:st.dailyDate});
 });
