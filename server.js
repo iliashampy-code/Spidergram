@@ -393,10 +393,17 @@ async function applyActivity(uid,event,localDate,localHour,extra={}){
  reward('people15',st.people.length>=15,100);
  const dailyEvent=event==='message'?'message':event==='photo'?'photo':event==='voice'?'voice':event==='group'?'group':event==='favorite'?'favorite':null;
  if(dailyEvent){for(const taskId of st.dailyTasks){const task=DAILY_CURRENCY_TASK_POOL.find(x=>x.id===taskId);if(!task)continue;let inc=task.event===dailyEvent?1:0;if(task.event==='people'&&event==='message'&&extra.peerId)inc=st.people.includes(String(extra.peerId))?1:0;if(!inc)continue;st.dailyProgress[taskId]=Math.min(task.target,Number(st.dailyProgress[taskId]||0)+inc);changed=true;if(st.dailyProgress[taskId]>=task.target&&!st.claimed['daily_'+date+'_'+taskId]){st.claimed['daily_'+date+'_'+taskId]=true;currencyEarned+=task.reward;}}}
- if(currencyEarned)await pool.query('UPDATE users SET currency=currency+$1 WHERE id=$2',[currencyEarned,uid]);
+ let currencyBalance=Number(u.currency||0);
+ if(currencyEarned){
+   const cr=await pool.query('UPDATE users SET currency=COALESCE(currency,0)+$1 WHERE id=$2 RETURNING currency',[currencyEarned,uid]);
+   currencyBalance=Number(cr.rows[0]?.currency||0);
+   try{io.to(String(uid)).emit('currency:notify',{amount:currencyEarned,balance:currencyBalance})}catch{}
+ }else{
+   currencyBalance=Number(u.currency||0);
+ }
  if(newTitles.length){for(const t of newTitles){if(t&&!awards.includes(t.name))awards.push(t.name)}await pool.query('UPDATE users SET title_awards=$1 WHERE id=$2',[JSON.stringify(awards),uid]);}
  if(changed)await pool.query('UPDATE users SET task_state=$1 WHERE id=$2',[JSON.stringify(st),uid]);
- return {newTitles:newTitles.filter(Boolean),currencyEarned,pioneerNotice};
+ return {newTitles:newTitles.filter(Boolean),currencyEarned,currency:currencyBalance,pioneerNotice};
 }
 async function getUser(uid){
   const r=await pool.query('SELECT * FROM users WHERE id=$1',[uid]);
