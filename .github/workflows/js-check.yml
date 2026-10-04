@@ -1,0 +1,21 @@
+name: JS syntax check
+on:
+  push:
+    branches: [main]
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Extract JavaScript
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          s=Path("index.html").read_text()
+          scripts=re.findall(r"<script(?:\\s[^>]*)?>(.*?)</script>",s,re.S|re.I)
+          Path("/tmp/scripts.js").write_text("\n;\n".join(scripts))
+          print("scripts:",len(scripts))
+          PY
+      - name: Check syntax
+        run: node --check /tmp/scripts.js
