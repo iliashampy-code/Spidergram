@@ -89,7 +89,7 @@ const shopItems=[
  {id:'bg_void',type:'background',name:'Void',price:145,value:'void',description:'Тёмный минималистичный фон'},
  {id:'bg_matrix2',type:'animated_background',name:'Digital Rain',price:300,value:'digital_rain',description:'Анимированный цифровой дождь'},
  {id:'bg_cosmos_anim',type:'animated_background',name:'Живой космос',price:310,value:'cosmos_anim',description:'Плавно движущийся космический фон'},
- {id:'bg_wave',type:'animated_background',name:'Neon Waves',price:320,value:'waves',description:'Анимированные неоновые волны'},
+ {id:'bg_wave',type:'animated_background',name:'Neon Waves',price:499,value:'waves',description:'Анимированные неоновые волны'},
  {id:'bg_spider_web',type:'background',name:'Паучья сеть',price:180,value:'spider_web',description:'Тёмная паутина с красным свечением'},
  {id:'bg_spider_night',type:'background',name:'Паучья ночь',price:210,value:'spider_night',description:'Чёрно-фиолетовая тема SpiderGram'},
  {id:'bg_spider_venom',type:'background',name:'Яд паука',price:240,value:'spider_venom',description:'Тёмная зелёная паучья тема'},
@@ -119,7 +119,14 @@ const shopItems=[
  {id:'title_starstruck',type:'title',name:'Звезданутый',price:619,value:'Звезданутый',start:'#facc15',end:'#ffffff',animated:true,description:'Жёлто-белый анимированный титул'},
  {id:'title_kotik',type:'title',name:'Котик',price:250,value:'Котик',start:'#22c55e',end:'#ffffff',animated:true,description:'Зелёно-белый анимированный титул'},
  {id:'title_seal',type:'title',name:'Тюлень',price:550,value:'Тюлень',start:'#38bdf8',end:'#ffffff',animated:true,description:'Голубой-белый анимированный титул'},
- {id:'bg_cloudy_sky',type:'animated_background',name:'Cloudy Sky',price:320,value:'cloudy_sky',description:'Плавно переливающиеся оттенки пасмурного неба без отдельных облаков'}
+ {id:'title_ghost',type:'title',name:'Ghost',price:799,value:'Ghost',start:'#6b7280',end:'#050505',animated:true,description:'Серый-чёрный анимированный градиент'},
+ {id:'bg_cloudy_sky',type:'animated_background',name:'Cloudy Sky',price:499,value:'cloudy_sky',description:'Плавно переливающиеся оттенки пасмурного неба без отдельных облаков'},
+ {id:'bg_night_city',type:'animated_background',name:'Night City',price:499,value:'night_city',description:'Стилизованный ночной город с медленным движением неоновых огней'},
+ {id:'bg_northern_lights',type:'animated_background',name:'Northern Lights',price:499,value:'northern_lights',description:'Мягкое анимированное северное сияние в графическом стиле'},
+ {id:'bg_blood_moon',type:'animated_background',name:'Blood Moon',price:499,value:'blood_moon',description:'Тёмный фон с пульсирующим красным лунным свечением'},
+ {id:'bg_black_sand',type:'animated_background',name:'Black Sand',price:499,value:'black_sand',description:'Абстрактные тёмные волны чёрного песка'},
+ {id:'bg_deep_ocean_anim',type:'animated_background',name:'Deep Ocean',price:499,value:'deep_ocean_anim',description:'Стилизованные движущиеся волны глубокого океана'},
+ {id:'bg_galaxy_anim',type:'animated_background',name:'Galaxy',price:499,value:'galaxy_anim',description:'Абстрактная галактика с медленно движущимися световыми пятнами'}
 ];
 function parseJson(value,fallback){try{return JSON.parse(value||'')}catch{return fallback}}
 function currentReward(days){
