@@ -83,6 +83,29 @@ body.shop-effect-aurora .profile-card,body.shop-effect-aurora .bigavatar{animati
 .group-call-panel{position:fixed;inset:0;z-index:1100;background:linear-gradient(145deg,#171c23,#090c10);color:#fff;display:flex;flex-direction:column;padding:env(safe-area-inset-top) 16px env(safe-area-inset-bottom);overflow:hidden}.group-call-head{height:70px;display:flex;align-items:center;gap:12px;flex:none}.group-call-head .group-call-close{margin-left:auto}.group-call-title{font-size:20px;font-weight:800}.group-call-sub{font-size:13px;color:#9ca6b0;margin-top:2px}.group-call-grid{flex:1;display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:12px;align-content:center;overflow:auto;padding:12px 0}.group-call-tile{min-height:150px;border-radius:22px;background:#20262e;border:1px solid #ffffff12;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px}.group-call-tile .avatar{width:82px;height:82px}.group-call-tile-name{max-width:90%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:700}.group-call-controls{display:flex;justify-content:center;gap:18px;padding:18px 0 12px}.group-call-control{width:64px;height:64px;border:0;border-radius:50%;display:grid;place-items:center;background:#303740;color:#fff}.group-call-control.danger{background:#ef4444}.group-call-control svg{width:29px;height:29px}.group-call-toast{position:fixed;z-index:1200;left:14px;right:14px;bottom:18px;background:#20262e;color:#fff;border-radius:18px;padding:14px;display:flex;align-items:center;gap:12px;box-shadow:0 10px 35px #0008}.group-call-toast-text{flex:1}.group-call-toast-title{font-weight:800}.group-call-toast-sub{font-size:12px;color:#aeb7c2}.group-call-join{border:0;border-radius:12px;background:#1688ff;color:#fff;font-weight:700;padding:10px 14px}
 </style></style></style></head><body><div class="app" id="app"><div class="login"><h1>Spider<span class="blue">Gram</span></h1><p>Загрузка…</p></div></div>
 <script>
+(function(){
+  window.__sgBootDone=false;
+  var started=Date.now();
+  function showBootError(msg){
+    if(window.__sgBootDone)return;
+    var app=document.getElementById("app");
+    if(!app)return;
+    var text=String(msg||"Неизвестная ошибка запуска");
+    if(!app.innerHTML.includes("Загрузка"))return;
+    app.innerHTML='<div class="login"><h1>Spider<span class="blue">Gram</span></h1><p style="color:#e5484d">SpiderGram не смог запуститься</p><div style="background:var(--input);border-radius:14px;padding:12px;margin:14px 0;text-align:left;font-size:12px;word-break:break-word">Ошибка: '+text.replace(/[&<>"']/g,function(ch){return {"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[ch]})+'</div><button class="primary" onclick="location.reload()">Перезагрузить</button></div>';
+  }
+  window.addEventListener("error",function(e){
+    setTimeout(function(){showBootError(e.message||"Ошибка JavaScript")},0);
+  });
+  window.addEventListener("unhandledrejection",function(e){
+    setTimeout(function(){showBootError(e.reason?.message||e.reason||"Ошибка запуска")},0);
+  });
+  setTimeout(function(){
+    if(!window.__sgBootDone)showBootError("Основной код SpiderGram не запустился за 5 секунд");
+  },5000);
+})();
+</script>
+<script>
 window.addEventListener("error",e=>{if(document.getElementById("app")&&!document.getElementById("app").innerHTML.trim())document.getElementById("app").innerHTML="<div class=empty>Ошибка загрузки SpiderGram. Обнови страницу.</div>"});window.addEventListener("unhandledrejection",e=>{console.error(e.reason)});const app=document.getElementById("app");function syncViewport(){if(!window.visualViewport)return;document.documentElement.style.setProperty("--vvh",window.visualViewport.height+"px");app.style.height=window.visualViewport.height+"px";app.style.minHeight=window.visualViewport.height+"px";window.scrollTo(0,0)}if(window.visualViewport){window.visualViewport.addEventListener("resize",syncViewport);window.visualViewport.addEventListener("scroll",()=>window.scrollTo(0,0));setTimeout(syncViewport,0)}let currentGroup=null;let token=localStorage.getItem("sgToken")||null,user=null,base=location.origin,sock,peer,typingTimer,recording=false,recorder,chunks=[],activeCall=null,callRemoteAudio=null,groupCall=null;
 function safeJSON(key,fallback){try{const raw=localStorage.getItem(key);return raw?JSON.parse(raw):fallback}catch(e){localStorage.removeItem(key);return fallback}}
 user=safeJSON("sgUser",null);
@@ -555,7 +578,7 @@ function setBackground(e){const f=e.target.files[0];if(!f)return;if(f.size>3*102
 function clearBackground(){delete settings.bg;localStorage.sgSettings=JSON.stringify(settings);applySettings();profile()}
 function logout(){localStorage.removeItem("sgToken");localStorage.removeItem("sgUser");token=null;user=null;if(sock)sock.disconnect();login()}
 document.addEventListener("click",e=>{if(e.target.closest("#settingsBtn"))profile()});if(token&&user){home();setTimeout(()=>{try{connect()}catch(e){console.warn("Socket startup error:",e)}},0)}else{login()}
-setTimeout(()=>{if(token&&user)syncShopState()},0);
+setTimeout(()=>{if(token&&user)syncShopState()},0);window.__sgBootDone=true;
 </script></body></html><style>
 @media (max-width:560px){
  .call-panel{padding:10px 8px}
