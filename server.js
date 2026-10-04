@@ -132,16 +132,6 @@ const makeToken=u=>jwt.sign({id:u.id},SECRET,{expiresIn:'30d'});
 async function initDb(){
   if(!process.env.DATABASE_URL) throw new Error('DATABASE_URL не задан. Добавь PostgreSQL в Railway и подключи его к сервису.');
   await pool.query(`
-    CREATE TABLE IF NOT EXISTS media_reservations(
-      id TEXT PRIMARY KEY,
-      object_key TEXT UNIQUE NOT NULL,
-      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      media_type TEXT NOT NULL,
-      size_bytes BIGINT NOT NULL,
-      created_at BIGINT NOT NULL,
-      expires_at BIGINT
-    );
-    CREATE INDEX IF NOT EXISTS media_reservations_expiry_idx ON media_reservations(expires_at);
     CREATE TABLE IF NOT EXISTS users(
       id TEXT PRIMARY KEY,
       username TEXT UNIQUE NOT NULL,
@@ -167,6 +157,16 @@ async function initDb(){
     );
     CREATE INDEX IF NOT EXISTS messages_pair_idx ON messages("from","to",created_at);
     CREATE INDEX IF NOT EXISTS users_username_idx ON users(username);
+    CREATE TABLE IF NOT EXISTS media_reservations(
+      id TEXT PRIMARY KEY,
+      object_key TEXT UNIQUE NOT NULL,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      media_type TEXT NOT NULL,
+      size_bytes BIGINT NOT NULL,
+      created_at BIGINT NOT NULL,
+      expires_at BIGINT
+    );
+    CREATE INDEX IF NOT EXISTS media_reservations_expiry_idx ON media_reservations(expires_at);
     ALTER TABLE users ADD COLUMN IF NOT EXISTS custom_title TEXT NOT NULL DEFAULT '';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS admin_check BOOLEAN NOT NULL DEFAULT FALSE;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS selected_title TEXT NOT NULL DEFAULT '';
