@@ -114,11 +114,11 @@ const shopItems=[
  {id:'effect_orbit',type:'profile_effect',name:'Orbit',price:340,value:'orbit',description:'Движущееся энергетическое кольцо'},
  {id:'effect_flame',type:'profile_effect',name:'Flame',price:330,value:'flame',description:'Пульсирующее пламя профиля'},
  {id:'effect_aurora',type:'profile_effect',name:'Aurora Glow',price:360,value:'aurora',description:'Анимированное северное сияние'},
- {id:'title_weakling',type:'title',name:'Доходяга',price:250,value:'Доходяга',start:'#111111',end:'#38bdf8',animated:true,description:'Чёрно-голубой титул'},
- {id:'title_error404',type:'title',name:'Error 404',price:350,value:'Error 404',start:'#38bdf8',end:'#ffffff',animated:true,description:'Голубой-белый анимированный титул'},
- {id:'title_starstruck',type:'title',name:'Звезданутый',price:250,value:'Звезданутый',start:'#facc15',end:'#ffffff',animated:true,description:'Жёлто-белый анимированный титул'},
+ {id:'title_weakling',type:'title',name:'Доходяга',price:550,value:'Доходяга',start:'#111111',end:'#38bdf8',animated:true,description:'Чёрно-голубой титул'},
+ {id:'title_error404',type:'title',name:'Error 404',price:550,value:'Error 404',start:'#38bdf8',end:'#ffffff',animated:true,description:'Голубой-белый анимированный титул'},
+ {id:'title_starstruck',type:'title',name:'Звезданутый',price:619,value:'Звезданутый',start:'#facc15',end:'#ffffff',animated:true,description:'Жёлто-белый анимированный титул'},
  {id:'title_kotik',type:'title',name:'Котик',price:250,value:'Котик',start:'#22c55e',end:'#ffffff',animated:true,description:'Зелёно-белый анимированный титул'},
- {id:'title_seal',type:'title',name:'Тюлень',price:250,value:'Тюлень',start:'#38bdf8',end:'#ffffff',animated:true,description:'Голубой-белый анимированный титул'},
+ {id:'title_seal',type:'title',name:'Тюлень',price:550,value:'Тюлень',start:'#38bdf8',end:'#ffffff',animated:true,description:'Голубой-белый анимированный титул'},
  {id:'bg_cloudy_sky',type:'animated_background',name:'Cloudy Sky',price:320,value:'cloudy_sky',description:'Плавно переливающиеся оттенки пасмурного неба без отдельных облаков'}
 ];
 function parseJson(value,fallback){try{return JSON.parse(value||'')}catch{return fallback}}
