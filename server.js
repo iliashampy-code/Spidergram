@@ -355,7 +355,7 @@ async function applyActivity(uid,event,localDate,localHour,extra={}){
  const st=taskStateFor(u); const hour=Math.max(0,Math.min(23,Number(localHour)||0)); const date=String(localDate||new Date().toISOString().slice(0,10)); let changed=false; let currencyEarned=0;
  if(st.dailyDate!==date){st.dailyDate=date;st.dailyTasks=dailyTasksForDate(date).map(x=>x.id);st.dailyProgress={};changed=true;}
  if(event==='visit'){
-   if(hour===21){st.sweetDreamVisits=Math.min(3,st.sweetDreamVisits+1);changed=true}
+   if(hour===21){st.sweetDreamVisits=Math.min(7,st.sweetDreamVisits+1);changed=true}
    if(!st.claimed['daily_login_'+date]){st.claimed['daily_login_'+date]=true;currencyEarned+=10;changed=true}
    if((hour>=22||hour<5)&&!st.nightDates.includes(date)){st.nightDates.push(date);st.nightDates=st.nightDates.slice(-60);changed=true}
    if(hour<5&&!st.midnightDates.includes(date)){st.midnightDates.push(date);st.midnightDates=st.midnightDates.slice(-60);changed=true}
