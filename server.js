@@ -40,15 +40,16 @@ function rewardForDays(days){
 }
 const taskTitleRewards=[
  {key:'collector',name:'Коллекционер',start:'#67e8f9',end:'#ffffff',animated:true,description:'Выполнить 10 достижений'},
- {key:'unstoppable',name:'Без остановки',start:'#ff2d00',end:'#ffd000',animated:true,description:'Заходить в SpiderGram 3 дня подряд'},
- {key:'night_spider',name:'night spider',start:'#102a72',end:'#ffffff',animated:true,description:'Использовать SpiderGram ночью'},
- {key:'big_boss',name:'Big boss',start:'#111111',end:'#ef4444',animated:true,description:'Создать 5 групп'},
- {key:'friendly',name:'дружелюбный',start:'#a3e635',end:'#a3e635',animated:false,description:'Отправить сообщение 5 разным людям'},
- {key:'nightnik',name:'ночник',start:'#111111',end:'#fff1a8',animated:true,description:'Использовать мессенджер после 00:00 5 раз'},
- {key:'batman',name:'batman',start:'#111111',end:'#facc15',animated:true,description:'Отправить сообщение в 3:00–4:00 ночи'}, {key:'living_legend',name:'живая легенда',start:'#facc15',end:'#ffffff',animated:true,description:'Отправить 100 сообщений'},
- {key:'love',name:'Love',start:'#111111',end:'#ec4899',animated:true,description:'Написать 10 разным людям'},
- {key:'emperor',name:'Император',start:'#111111',end:'#facc15',animated:true,description:'Создать 10 групп и отправить 100 сообщений'},
- {key:'sweet_dreams',name:'Sweet dreams',start:'#e11d48',end:'#ffffff',animated:true,description:'Зайти в SpiderGram 3 раза с 21:00 до 22:00'}
+ {key:'unstoppable',name:'Без остановки',start:'#ff2d00',end:'#ffd000',animated:true,description:'Заходить в SpiderGram 7 дней подряд'},
+ {key:'night_spider',name:'night spider',start:'#102a72',end:'#ffffff',animated:true,description:'Использовать SpiderGram ночью в 7 разных дней'},
+ {key:'big_boss',name:'Big boss',start:'#111111',end:'#ef4444',animated:true,description:'Создать 10 групп'},
+ {key:'friendly',name:'дружелюбный',start:'#a3e635',end:'#a3e635',animated:false,description:'Отправить сообщения 10 разным людям'},
+ {key:'nightnik',name:'ночник',start:'#111111',end:'#fff1a8',animated:true,description:'Использовать мессенджер после 00:00 в 10 разных дней'},
+ {key:'batman',name:'batman',start:'#111111',end:'#facc15',animated:true,description:'Отправить сообщения в 3:00–4:00 ночи в 5 разных дней'},
+ {key:'living_legend',name:'живая легенда',start:'#facc15',end:'#ffffff',animated:true,description:'Отправить 500 сообщений'},
+ {key:'love',name:'Love',start:'#111111',end:'#ec4899',animated:true,description:'Написать 25 разным людям'},
+ {key:'emperor',name:'Император',start:'#111111',end:'#facc15',animated:true,description:'Создать 20 групп и отправить 500 сообщений'},
+ {key:'sweet_dreams',name:'Sweet dreams',start:'#e11d48',end:'#ffffff',animated:true,description:'Зайти в SpiderGram 7 раз с 21:00 до 22:00'}
 ];
 const taskTitleNames=taskTitleRewards.map(x=>x.name);
 const shopItems=[
@@ -275,6 +276,10 @@ async function initDb(){
       redeemed_at BIGINT NOT NULL,
       PRIMARY KEY(code,user_id)
     );
+    CREATE TABLE IF NOT EXISTS system_meta(
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL DEFAULT ''
+    );
     CREATE TABLE IF NOT EXISTS call_notifications(
       id TEXT PRIMARY KEY,
       to_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -300,6 +305,21 @@ async function initDb(){
       await pool.query('UPDATE users SET task_state=$1 WHERE id=$2',[JSON.stringify(state),pioneer.id]);
     }
   }
+  const titleResetVersion='titles_reset_v1';
+  const titleResetMarker=await pool.query('SELECT value FROM system_meta WHERE key=$1',[titleResetVersion]);
+  if(!titleResetMarker.rowCount){
+    const earnedNames=new Set([...rewardForDays(356).filter(x=>x.type==='title').map(x=>x.name),...taskTitleNames,FOUNDER_TITLE.name]);
+    const existingUsers=await pool.query('SELECT id,title_awards,selected_title FROM users');
+    for(const u of existingUsers.rows){
+      const awards=parseJson(u.title_awards,[]).filter(x=>!earnedNames.has(String(x||'')));
+      const selected=earnedNames.has(String(u.selected_title||''))?'':(u.selected_title||'');
+      const resetState={nightDates:[],midnightDates:[],batmanDates:[],groups:0,messages:0,photos:0,voices:0,people:[],sweetDreamVisits:0,claimed:{},titles:[],dailyDate:'',dailyTasks:[],dailyProgress:{},pioneerNoticeVersion:2,titleResetNoticeVersion:1};
+      await pool.query('UPDATE users SET title_awards=$1,selected_title=$2,task_state=$3,currency=COALESCE(currency,0)+500 WHERE id=$4',[JSON.stringify(awards),selected,JSON.stringify(resetState),u.id]);
+    }
+    await pool.query('INSERT INTO system_meta(key,value) VALUES($1,$2)',[titleResetVersion,'completed']);
+    console.log('Title system reset v1 completed: old earned titles cleared, +500 SP compensation granted.');
+  }
+
   const pushCfg=await pool.query('SELECT * FROM push_config WHERE id=1');
   if(!pushCfg.rowCount){
     const keys=webpush.generateVAPIDKeys();
@@ -319,7 +339,7 @@ async function initDb(){
   }
 }
 
-function taskStateFor(u){const x=parseJson(u.task_state,{});return {nightDates:Array.isArray(x.nightDates)?x.nightDates:[],midnightDates:Array.isArray(x.midnightDates)?x.midnightDates:[],groups:Number(x.groups||0),messages:Number(x.messages||0),photos:Number(x.photos||0),voices:Number(x.voices||0),people:Array.isArray(x.people)?x.people:[],sweetDreamVisits:Number(x.sweetDreamVisits||0),claimed:x.claimed&&typeof x.claimed==='object'?x.claimed:{},titles:Array.isArray(x.titles)?x.titles:[],dailyDate:String(x.dailyDate||''),dailyTasks:Array.isArray(x.dailyTasks)?x.dailyTasks:[],dailyProgress:x.dailyProgress&&typeof x.dailyProgress==='object'?x.dailyProgress:{},pioneerNoticeVersion:Number(x.pioneerNoticeVersion||0)};}
+function taskStateFor(u){const x=parseJson(u.task_state,{});return {nightDates:Array.isArray(x.nightDates)?x.nightDates:[],midnightDates:Array.isArray(x.midnightDates)?x.midnightDates:[],batmanDates:Array.isArray(x.batmanDates)?x.batmanDates:[],groups:Number(x.groups||0),messages:Number(x.messages||0),photos:Number(x.photos||0),voices:Number(x.voices||0),people:Array.isArray(x.people)?x.people:[],sweetDreamVisits:Number(x.sweetDreamVisits||0),claimed:x.claimed&&typeof x.claimed==='object'?x.claimed:{},titles:Array.isArray(x.titles)?x.titles:[],dailyDate:String(x.dailyDate||''),dailyTasks:Array.isArray(x.dailyTasks)?x.dailyTasks:[],dailyProgress:x.dailyProgress&&typeof x.dailyProgress==='object'?x.dailyProgress:{},pioneerNoticeVersion:Number(x.pioneerNoticeVersion||0),titleResetNoticeVersion:Number(x.titleResetNoticeVersion||0)};}
 const DAILY_CURRENCY_TASK_POOL=[
  {id:'daily_messages10',name:'Отправить 10 сообщений',event:'message',target:10,reward:20},
  {id:'daily_people3',name:'Написать 3 разным людям',event:'people',target:3,reward:30},
@@ -358,16 +378,17 @@ async function applyActivity(uid,event,localDate,localHour,extra={}){
  const previousVisitDates=st.claimed._visitDates&&Array.isArray(st.claimed._visitDates)?st.claimed._visitDates:[];
  if(event==='visit'&&!previousVisitDates.includes(date)){previousVisitDates.push(date);st.claimed._visitDates=previousVisitDates.slice(-60);changed=true;}
  let consecutive=0;if(previousVisitDates.length){const ds=[...previousVisitDates].sort().reverse();consecutive=1;for(let i=1;i<ds.length;i++){const a=new Date(ds[i-1]+'T12:00:00'),b=new Date(ds[i]+'T12:00:00');if(Math.round((a-b)/86400000)===1)consecutive++;else break;}}
- if(consecutive>=3)addTitle('unstoppable');
- if(st.sweetDreamVisits>=3)addTitle('sweet_dreams');
- if(st.nightDates.length>=1)addTitle('night_spider');
- if(st.groups>=5)addTitle('big_boss');
- if(st.people.length>=5)addTitle('friendly');
- if(st.midnightDates.length>=5)addTitle('nightnik');
- if((event==='message'||event==='message_time')&&hour>=3&&hour<4)addTitle('batman');
- if(st.messages>=100)addTitle('living_legend');
- if(st.people.length>=10)addTitle('love');
- if(st.groups>=10&&st.messages>=100)addTitle('emperor');
+ if((event==='message'||event==='message_time')&&hour>=3&&hour<4&&!st.batmanDates.includes(date)){st.batmanDates.push(date);st.batmanDates=st.batmanDates.slice(-60);changed=true;}
+ if(consecutive>=7)addTitle('unstoppable');
+ if(st.sweetDreamVisits>=7)addTitle('sweet_dreams');
+ if(st.nightDates.length>=7)addTitle('night_spider');
+ if(st.groups>=10)addTitle('big_boss');
+ if(st.people.length>=10)addTitle('friendly');
+ if(st.midnightDates.length>=10)addTitle('nightnik');
+ if(st.batmanDates.length>=5)addTitle('batman');
+ if(st.messages>=500)addTitle('living_legend');
+ if(st.people.length>=25)addTitle('love');
+ if(st.groups>=20&&st.messages>=500)addTitle('emperor');
 
  // «Коллекционер» считает все полученные достижения/титулы, кроме валютных заданий.
  // В том числе считаются титулы за дни и все task-title achievements.
@@ -403,7 +424,9 @@ async function applyActivity(uid,event,localDate,localHour,extra={}){
  }
  if(newTitles.length){for(const t of newTitles){if(t&&!awards.includes(t.name))awards.push(t.name)}await pool.query('UPDATE users SET title_awards=$1 WHERE id=$2',[JSON.stringify(awards),uid]);}
  if(changed)await pool.query('UPDATE users SET task_state=$1 WHERE id=$2',[JSON.stringify(st),uid]);
- return {newTitles:newTitles.filter(Boolean),currencyEarned,currency:currencyBalance,pioneerNotice};
+ const titleResetNotice=Number(st.titleResetNoticeVersion||0)===1;
+ if(titleResetNotice){st.titleResetNoticeVersion=2;await pool.query('UPDATE users SET task_state=$1 WHERE id=$2',[JSON.stringify(st),uid]);}
+ return {newTitles:newTitles.filter(Boolean),currencyEarned,currency:currencyBalance,pioneerNotice,titleResetNotice};
 }
 async function getUser(uid){
   const r=await pool.query('SELECT * FROM users WHERE id=$1',[uid]);
