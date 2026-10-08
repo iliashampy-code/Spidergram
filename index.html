@@ -598,20 +598,21 @@ function registrationChart(data){
   const dots=pts.map((x,i)=>'<circle cx="'+x[0].toFixed(1)+'" cy="'+x[1].toFixed(1)+'" r="3.5" fill="var(--accent)"><title>'+esc(rows[i].label)+': '+(Number(rows[i].count)||0)+'</title></circle>').join('');
   return '<div style="overflow:hidden;width:100%"><svg viewBox="0 0 '+w+' '+h+'" style="width:100%;height:auto;display:block" role="img" aria-label="Регистрации пользователей за последние 30 дней"><line x1="'+p+'" y1="'+(h-p)+'" x2="'+(w-p)+'" y2="'+(h-p)+'" stroke="var(--line)"/>'+bars+line+dots+labels+'</svg></div>';
 }
-async function loadStats(tab='overview'){
+async function loadStats(tab='overview',period='30'){
   stopStatsRefresh();
   try{
-    const s=await api("/api/stats");
+    const s=await api("/api/stats?period="+encodeURIComponent(period));
     const chart=registrationChart(s.registrations);
-    app.innerHTML='<div class="top"><button class="icon" onclick="profile()">‹</button><div class="brand">Статистика</div><span></span></div><div class="profile"><div class="section" style="display:flex;gap:8px;padding:8px"><button id="statsTabOverview" class="chip" onclick="loadStats(\'overview\')" style="flex:1">Общая</button><button id="statsTabRegistrations" class="chip" onclick="loadStats(\'registrations\')" style="flex:1">Регистрации</button></div><div id="statsContent"></div></div>';
+    const periods=[['all','Все время'],['360','360 дней'],['30','30 дней'],['7','7 дней']];
+    const periodButtons=periods.map(x=>'<button class="chip '+(x[0]===period?'active':'')+'" onclick="loadStats(\'registrations\',\''+x[0]+'\')" style="flex:1;min-width:72px">'+x[1]+'</button>').join('');
+    app.innerHTML='<div class="top"><button class="icon" onclick="profile()">‹</button><div class="brand">Статистика</div><span></span></div><div class="profile"><div class="section" style="display:flex;gap:8px;padding:8px"><button id="statsTabOverview" class="chip '+(tab==='overview'?'active':'')+'" onclick="loadStats(\'overview\',\''+period+'\')" style="flex:1">Общая</button><button id="statsTabRegistrations" class="chip '+(tab==='registrations'?'active':'')+'" onclick="loadStats(\'registrations\',\''+period+'\')" style="flex:1">Регистрации</button></div><div id="statsContent"></div></div>';
     const box=document.getElementById('statsContent');
     if(tab==='registrations'){
-      box.innerHTML='<div class="section"><h3>РЕГИСТРАЦИИ ПОЛЬЗОВАТЕЛЕЙ</h3><div style="color:var(--muted);font-size:13px;margin-bottom:10px">Новые пользователи за последние 30 дней. График обновляется автоматически.</div><div class="profile-card" style="padding:8px">'+chart+'</div><div class="setting"><span>Всего пользователей</span><b>'+s.users+'</b></div></div>';
+      box.innerHTML='<div class="section"><h3>РЕГИСТРАЦИИ ПОЛЬЗОВАТЕЛЕЙ</h3><div style="color:var(--muted);font-size:13px;margin-bottom:10px">Период отображения:</div><div style="display:flex;gap:6px;overflow-x:auto;padding-bottom:8px">'+periodButtons+'</div><div style="color:var(--muted);font-size:13px;margin-bottom:10px">График обновляется автоматически.</div><div class="profile-card" style="padding:8px">'+chart+'</div><div class="setting"><span>Всего пользователей</span><b>'+s.users+'</b></div></div>';
     }else{
       box.innerHTML='<div class="profile-card" style="text-align:center"><div style="font-size:52px;font-weight:800;color:var(--accent);line-height:1.1">'+s.users+'</div><div style="color:var(--muted);margin-top:6px">Зарегистрированных пользователей</div></div><div class="section"><h3>СТАТИСТИКА</h3><div class="setting"><span>👤 Пользователи</span><b>'+s.users+'</b></div><div class="setting"><span>🟢 Сейчас в сети</span><b>'+(s.online||0)+'</b></div><div class="setting"><span>💬 Сообщения</span><b>'+s.messages+'</b></div><div class="setting"><span>👥 Группы</span><b>'+s.groups+'</b></div></div><div style="margin-top:28px;text-align:center;color:var(--muted);font-size:13px">Всего зарегистрировалось: <b style="color:var(--text)">'+s.users+'</b> '+(s.users===1?"человек":s.users<5?"человека":"человек")+'</div>';
     }
-    if(tab==='registrations'){statsRefreshTimer=setInterval(()=>loadStats('registrations'),10000)}
-    else {statsRefreshTimer=setInterval(()=>loadStats('overview'),10000)}
+    statsRefreshTimer=setInterval(()=>loadStats(tab,period),10000);
   }catch(e){stopStatsRefresh();alert("Не удалось загрузить статистику: "+e.message)}
 }
 
