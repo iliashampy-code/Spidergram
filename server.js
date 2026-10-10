@@ -864,7 +864,7 @@ app.post('/api/polls/:id/vote',auth,async(req,res)=>{
 app.get('/api/groups/:id/messages',auth,async(req,res)=>{
  const mem=await pool.query('SELECT 1 FROM group_members WHERE group_id=$1 AND user_id=$2',[req.params.id,req.user.id]); if(!mem.rowCount)return res.status(403).json({error:'Нет доступа'});
  const r=await pool.query('SELECT id,"from",text,type,media_url,created_at,edited,deleted FROM group_messages WHERE group_id=$1 ORDER BY created_at ASC LIMIT 500',[req.params.id]);
- res.json(r.rows.map(m=>({id:m.id,from:m.from,text:m.deleted?'Сообщение удалено':m.text,type:m.deleted?'deleted':m.type,mediaUrl:m.deleted?'':m.media_url,createdAt:Number(m.created_at),edited:!!m.edited,deleted:!!m.deleted,reactions:[]})));
+ res.json(await Promise.all(r.rows.map(async m=>({id:m.id,from:m.from,text:m.deleted?'Сообщение удалено':m.text,type:m.deleted?'deleted':m.type,mediaUrl:m.deleted?'':m.media_url,createdAt:Number(m.created_at),edited:!!m.edited,deleted:!!m.deleted,reactions:[],...(m.type==='poll'&&!m.deleted?{poll:await pollForMessage(m.id,m.text,req.user.id)}:{})}))));
 });
 app.post('/api/groups/:id/messages',auth,async(req,res)=>{
  const mem=await pool.query('SELECT 1 FROM group_members WHERE group_id=$1 AND user_id=$2',[req.params.id,req.user.id]); if(!mem.rowCount)return res.status(403).json({error:'Нет доступа'});
