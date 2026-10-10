@@ -198,6 +198,7 @@ async function initDb(){
       PRIMARY KEY(message_id,user_id,option_index)
     );
     CREATE INDEX IF NOT EXISTS poll_votes_message_idx ON poll_votes(message_id);
+    ALTER TABLE poll_votes ADD COLUMN IF NOT EXISTS voted_at BIGINT NOT NULL DEFAULT 0;
     ALTER TABLE messages ADD COLUMN IF NOT EXISTS edited BOOLEAN NOT NULL DEFAULT FALSE;
     ALTER TABLE messages ADD COLUMN IF NOT EXISTS deleted BOOLEAN NOT NULL DEFAULT FALSE;
     ALTER TABLE messages ADD COLUMN IF NOT EXISTS reply_to TEXT;
