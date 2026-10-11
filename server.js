@@ -144,14 +144,17 @@ function currentReward(days){
  return all.filter(r=>r.type==='title'&&days>=r.days).pop()||null;
 }
 function currentVisitStreak(u){const st=parseJson(u?.task_state,{}),dates=Array.isArray(st?.claimed?._visitDates)?[...new Set(st.claimed._visitDates.map(String))].sort().reverse():[];if(!dates.length)return 0;const today=new Date().toISOString().slice(0,10);const dayNum=d=>Math.floor(Date.parse(d+'T12:00:00Z')/86400000);if(dayNum(today)-dayNum(dates[0])>1)return 0;let count=1;for(let i=1;i<dates.length;i++){if(dayNum(dates[i-1])-dayNum(dates[i])===1)count++;else break;}return count;}
+let adminDisplaySettings={showLastSeen:true,showOnlineStatus:true,readReceipts:true};
 const parsePrivacy=u=>{try{return {...{showOnlineStatus:true,showLastSeen:true,readReceipts:true},...(typeof u.privacy_settings==='string'?JSON.parse(u.privacy_settings):(u.privacy_settings||{}))}}catch{return {showOnlineStatus:true,showLastSeen:true,readReceipts:true}}};
-const publicUser=u=>{const privacy=parsePrivacy(u);return {id:u.id,username:u.username,name:u.name||u.username,avatar:u.avatar||'',online:privacy.showOnlineStatus!==false&&!!u.online,lastSeen:privacy.showLastSeen!==false?(u.last_seen||null):null,privacySettings:privacy,customTitle:u.custom_title||'',adminCheck:!!u.admin_check,selectedTitle:u.selected_title||'',titleAwards:(()=>{try{return JSON.parse(u.title_awards||'[]')}catch{return[]}})(),customColorEnabled:!!u.custom_color_enabled,days:Math.max(0,Math.floor((Date.now()-Number(u.created_at||Date.now()))/86400000)),streak:currentVisitStreak(u),title:currentReward(Math.max(0,Math.floor((Date.now()-Number(u.created_at||Date.now()))/86400000)))}};
-const presenceFor=async(userId,online,lastSeen)=>{const r=await pool.query('SELECT privacy_settings FROM users WHERE id=$1',[userId]);const p=parsePrivacy(r.rows[0]||{});return {userId,online:p.showOnlineStatus!==false&&!!online,lastSeen:p.showLastSeen!==false?lastSeen:null}};
+const publicUser=u=>{const privacy=parsePrivacy(u);return {id:u.id,username:u.username,name:u.name||u.username,avatar:u.avatar||'',online:adminDisplaySettings.showOnlineStatus&&privacy.showOnlineStatus!==false&&!!u.online,lastSeen:adminDisplaySettings.showLastSeen&&privacy.showLastSeen!==false?(u.last_seen||null):null,privacySettings:privacy,customTitle:u.custom_title||'',adminCheck:!!u.admin_check,selectedTitle:u.selected_title||'',titleAwards:(()=>{try{return JSON.parse(u.title_awards||'[]')}catch{return[]}})(),customColorEnabled:!!u.custom_color_enabled,days:Math.max(0,Math.floor((Date.now()-Number(u.created_at||Date.now()))/86400000)),streak:currentVisitStreak(u),title:currentReward(Math.max(0,Math.floor((Date.now()-Number(u.created_at||Date.now()))/86400000)))}};
+const presenceFor=async(userId,online,lastSeen)=>{const r=await pool.query('SELECT privacy_settings FROM users WHERE id=$1',[userId]);const p=parsePrivacy(r.rows[0]||{});return {userId,online:adminDisplaySettings.showOnlineStatus&&p.showOnlineStatus!==false&&!!online,lastSeen:adminDisplaySettings.showLastSeen&&p.showLastSeen!==false?lastSeen:null}};
 const makeToken=u=>jwt.sign({id:u.id},SECRET,{expiresIn:'30d'});
 
 async function initDb(){
   if(!process.env.DATABASE_URL) throw new Error('DATABASE_URL не задан. Добавь PostgreSQL в Railway и подключи его к сервису.');
   await pool.query(`
+    CREATE TABLE IF NOT EXISTS admin_display_settings(id INTEGER PRIMARY KEY DEFAULT 1 CHECK (id=1), show_last_seen BOOLEAN NOT NULL DEFAULT TRUE, show_online_status BOOLEAN NOT NULL DEFAULT TRUE, read_receipts BOOLEAN NOT NULL DEFAULT TRUE);
+    INSERT INTO admin_display_settings(id) VALUES(1) ON CONFLICT(id) DO NOTHING;
     CREATE TABLE IF NOT EXISTS users(
       id TEXT PRIMARY KEY,
       username TEXT UNIQUE NOT NULL,
@@ -303,6 +306,8 @@ async function initDb(){
     );
     CREATE INDEX IF NOT EXISTS call_notifications_to_idx ON call_notifications(to_user_id,read,created_at);
   `);
+  const displaySettingsRow=await pool.query('SELECT show_last_seen,show_online_status,read_receipts FROM admin_display_settings WHERE id=1');
+  if(displaySettingsRow.rows[0])adminDisplaySettings={showLastSeen:displaySettingsRow.rows[0].show_last_seen!==false,showOnlineStatus:displaySettingsRow.rows[0].show_online_status!==false,readReceipts:displaySettingsRow.rows[0].read_receipts!==false};
   const pioneerUsers=await pool.query('SELECT id,created_at,title_awards,currency,task_state FROM users WHERE created_at>0 AND created_at<=$1',[PIONEER_GRANT_CUTOFF]);
   for(const pioneer of pioneerUsers.rows){
     const state=parseJson(pioneer.task_state,{});
@@ -599,6 +604,8 @@ app.get('/api/rewards',auth,async(req,res)=>{
 });
 function isOwnerAdmin(u){return String(u?.username||'').toLowerCase()==='dobry'}
 async function requireOwnerAdmin(req,res){const u=await getUser(req.user.id);if(!isOwnerAdmin(u)){res.status(403).json({error:'Доступ только для @dobry'});return null}return u}
+app.get('/api/admin/display-settings',auth,async(req,res)=>{const admin=await requireOwnerAdmin(req,res);if(!admin)return;res.json(adminDisplaySettings)});
+app.patch('/api/admin/display-settings',auth,async(req,res)=>{const admin=await requireOwnerAdmin(req,res);if(!admin)return;const b=req.body||{};const next={showLastSeen:typeof b.showLastSeen==='boolean'?b.showLastSeen:adminDisplaySettings.showLastSeen,showOnlineStatus:typeof b.showOnlineStatus==='boolean'?b.showOnlineStatus:adminDisplaySettings.showOnlineStatus,readReceipts:typeof b.readReceipts==='boolean'?b.readReceipts:adminDisplaySettings.readReceipts};await pool.query('UPDATE admin_display_settings SET show_last_seen=$1,show_online_status=$2,read_receipts=$3 WHERE id=1',[next.showLastSeen,next.showOnlineStatus,next.readReceipts]);adminDisplaySettings=next;io.emit('admin:display-settings',next);res.json(next)});
 app.get('/api/admin/users',auth,async(req,res)=>{const admin=await requireOwnerAdmin(req,res);if(!admin)return;const q=String(req.query.q||'').trim().toLowerCase();const r=await pool.query("SELECT * FROM users WHERE ($1='' OR username ILIKE '%'||$1||'%' OR name ILIKE '%'||$1||'%') ORDER BY username LIMIT 50",[q]);res.json(r.rows.map(x=>({...publicUser(x),currency:Number(x.currency||0)})))});
 app.post('/api/promo/redeem',auth,async(req,res)=>{
  const code=String(req.body.code||'').trim().toUpperCase();
@@ -901,7 +908,7 @@ app.get('/api/messages/:uid',auth,async(req,res)=>{
   const r=await pool.query(`SELECT id,"from","to",text,type,media_url,created_at,edited,deleted FROM messages WHERE ("from"=$1 AND "to"=$2) OR ("from"=$2 AND "to"=$1) ORDER BY created_at DESC LIMIT 300`,[req.user.id,req.params.uid]);
   const peerRead=await pool.query('SELECT cr.last_read_at,u.privacy_settings FROM conversation_reads cr JOIN users u ON u.id=cr.user_id WHERE cr.user_id=$1 AND cr.peer_id=$2',[req.params.uid,req.user.id]);
   const peerPrivacy=parsePrivacy(peerRead.rows[0]||{});
-  const peerLastRead=peerPrivacy.readReceipts===false?0:Number(peerRead.rows[0]?.last_read_at||0);
+  const peerLastRead=(!adminDisplaySettings.readReceipts||peerPrivacy.readReceipts===false)?0:Number(peerRead.rows[0]?.last_read_at||0);
   const ids=r.rows.map(m=>m.id);
   let rx=[];
   if(ids.length){const q=await pool.query('SELECT message_id,user_id,emoji FROM reactions WHERE message_id=ANY($1)',[ids]);rx=q.rows;}
@@ -995,10 +1002,10 @@ app.get('/api/messages/search',auth,async(req,res)=>{
 });
 app.post('/api/messages/:uid/read',auth,async(req,res)=>{
  const current=await getUser(req.user.id);if(!current)return res.status(404).json({error:'Пользователь не найден'});
- const privacy=parsePrivacy(current);if(privacy.readReceipts===false)return res.json({ok:true,readAt:null,hidden:true});
+ const privacy=parsePrivacy(current);if(!adminDisplaySettings.readReceipts||privacy.readReceipts===false)return res.json({ok:true,readAt:null,hidden:true});
  const now=Date.now();await pool.query(`INSERT INTO conversation_reads(user_id,peer_id,last_read_at) VALUES($1,$2,$3)
  ON CONFLICT(user_id,peer_id) DO UPDATE SET last_read_at=EXCLUDED.last_read_at`,[req.user.id,req.params.uid,now]);
- io.to(req.params.uid).emit('read',{from:req.user.id,readAt:now});
+ if(adminDisplaySettings.readReceipts)io.to(req.params.uid).emit('read',{from:req.user.id,readAt:now});
  res.json({ok:true,readAt:now});
 });
 io.use((socket,next)=>{try{socket.user=jwt.verify(socket.handshake.auth?.token||'',SECRET);next();}catch{next(new Error('Unauthorized'));}});
