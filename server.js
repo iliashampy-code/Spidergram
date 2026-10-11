@@ -559,7 +559,7 @@ app.patch('/api/me',auth,async(req,res)=>{
 app.patch('/api/me/privacy',auth,async(req,res)=>{
  const current=await getUser(req.user.id);if(!current)return res.status(404).json({error:'Пользователь не найден'});
  const old=parsePrivacy(current),body=req.body||{};
- const next={showOnlineStatus:typeof body.showOnlineStatus==='boolean'?body.showOnlineStatus:old.showOnlineStatus,showLastSeen:typeof body.showLastSeen==='boolean'?body.showLastSeen:old.showLastSeen,readReceipts:typeof body.readReceipts==='boolean'?body.readReceipts:old.readReceipts};
+ const next={...old,showOnlineStatus:typeof body.showOnlineStatus==='boolean'?body.showOnlineStatus:old.showOnlineStatus,showLastSeen:typeof body.showLastSeen==='boolean'?body.showLastSeen:old.showLastSeen,readReceipts:typeof body.readReceipts==='boolean'?body.readReceipts:old.readReceipts};
  await pool.query('UPDATE users SET privacy_settings=$1 WHERE id=$2',[JSON.stringify(next),req.user.id]);
  const fresh=await getUser(req.user.id);io.emit('presence',await presenceFor(req.user.id,!!fresh.online,fresh.last_seen||null));res.json(publicUser(fresh));
 });
