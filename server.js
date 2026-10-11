@@ -144,7 +144,9 @@ function currentReward(days){
  return all.filter(r=>r.type==='title'&&days>=r.days).pop()||null;
 }
 function currentVisitStreak(u){const st=parseJson(u?.task_state,{}),dates=Array.isArray(st?.claimed?._visitDates)?[...new Set(st.claimed._visitDates.map(String))].sort().reverse():[];if(!dates.length)return 0;const today=new Date().toISOString().slice(0,10);const dayNum=d=>Math.floor(Date.parse(d+'T12:00:00Z')/86400000);if(dayNum(today)-dayNum(dates[0])>1)return 0;let count=1;for(let i=1;i<dates.length;i++){if(dayNum(dates[i-1])-dayNum(dates[i])===1)count++;else break;}return count;}
-const publicUser=u=>({id:u.id,username:u.username,name:u.name||u.username,avatar:u.avatar||'',online:!!u.online,lastSeen:u.last_seen||null,customTitle:u.custom_title||'',adminCheck:!!u.admin_check,selectedTitle:u.selected_title||'',titleAwards:(()=>{try{return JSON.parse(u.title_awards||'[]')}catch{return[]}})(),customColorEnabled:!!u.custom_color_enabled,days:Math.max(0,Math.floor((Date.now()-Number(u.created_at||Date.now()))/86400000)),streak:currentVisitStreak(u),title:currentReward(Math.max(0,Math.floor((Date.now()-Number(u.created_at||Date.now()))/86400000))) });
+const parsePrivacy=u=>{try{return {...{showOnlineStatus:true,showLastSeen:true,readReceipts:true},...(typeof u.privacy_settings==='string'?JSON.parse(u.privacy_settings):(u.privacy_settings||{}))}}catch{return {showOnlineStatus:true,showLastSeen:true,readReceipts:true}}};
+const publicUser=u=>{const privacy=parsePrivacy(u);return {id:u.id,username:u.username,name:u.name||u.username,avatar:u.avatar||'',online:privacy.showOnlineStatus!==false&&!!u.online,lastSeen:privacy.showLastSeen!==false?(u.last_seen||null):null,privacySettings:privacy,customTitle:u.custom_title||'',adminCheck:!!u.admin_check,selectedTitle:u.selected_title||'',titleAwards:(()=>{try{return JSON.parse(u.title_awards||'[]')}catch{return[]}})(),customColorEnabled:!!u.custom_color_enabled,days:Math.max(0,Math.floor((Date.now()-Number(u.created_at||Date.now()))/86400000)),streak:currentVisitStreak(u),title:currentReward(Math.max(0,Math.floor((Date.now()-Number(u.created_at||Date.now()))/86400000)))}};
+const presenceFor=async(userId,online,lastSeen)=>{const r=await pool.query('SELECT privacy_settings FROM users WHERE id=$1',[userId]);const p=parsePrivacy(r.rows[0]||{});return {userId,online:p.showOnlineStatus!==false&&!!online,lastSeen:p.showLastSeen!==false?lastSeen:null}};
 const makeToken=u=>jwt.sign({id:u.id},SECRET,{expiresIn:'30d'});
 
 async function initDb(){
@@ -186,6 +188,7 @@ async function initDb(){
     );
     CREATE INDEX IF NOT EXISTS media_reservations_expiry_idx ON media_reservations(expires_at);
     ALTER TABLE users ADD COLUMN IF NOT EXISTS custom_title TEXT NOT NULL DEFAULT '';
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS privacy_settings TEXT NOT NULL DEFAULT '{"showOnlineStatus":true,"showLastSeen":true,"readReceipts":true}';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS admin_check BOOLEAN NOT NULL DEFAULT FALSE;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS selected_title TEXT NOT NULL DEFAULT '';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS title_awards TEXT NOT NULL DEFAULT '[]';
@@ -547,6 +550,13 @@ app.patch('/api/me',auth,async(req,res)=>{
     res.status(500).json({error:'Не удалось сохранить профиль'});
   }
 });
+app.patch('/api/me/privacy',auth,async(req,res)=>{
+ const current=await getUser(req.user.id);if(!current)return res.status(404).json({error:'Пользователь не найден'});
+ const old=parsePrivacy(current),body=req.body||{};
+ const next={showOnlineStatus:typeof body.showOnlineStatus==='boolean'?body.showOnlineStatus:old.showOnlineStatus,showLastSeen:typeof body.showLastSeen==='boolean'?body.showLastSeen:old.showLastSeen,readReceipts:typeof body.readReceipts==='boolean'?body.readReceipts:old.readReceipts};
+ await pool.query('UPDATE users SET privacy_settings=$1 WHERE id=$2',[JSON.stringify(next),req.user.id]);
+ const fresh=await getUser(req.user.id);res.json(publicUser(fresh));
+});
 app.patch('/api/me/title',auth,async(req,res)=>{
   const u=await getUser(req.user.id);if(!u)return res.status(404).json({error:'Пользователь не найден'});
   const title=String(req.body.title||'').trim().slice(0,60);
@@ -889,8 +899,9 @@ app.get('/api/messages/:uid',auth,async(req,res)=>{
   const other=await getUser(req.params.uid);
   if(!other)return res.status(404).json({error:'Пользователь не найден'});
   const r=await pool.query(`SELECT id,"from","to",text,type,media_url,created_at,edited,deleted FROM messages WHERE ("from"=$1 AND "to"=$2) OR ("from"=$2 AND "to"=$1) ORDER BY created_at DESC LIMIT 300`,[req.user.id,req.params.uid]);
-  const peerRead=await pool.query('SELECT last_read_at FROM conversation_reads WHERE user_id=$1 AND peer_id=$2',[req.params.uid,req.user.id]);
-  const peerLastRead=Number(peerRead.rows[0]?.last_read_at||0);
+  const peerRead=await pool.query('SELECT cr.last_read_at,u.privacy_settings FROM conversation_reads cr JOIN users u ON u.id=cr.user_id WHERE cr.user_id=$1 AND cr.peer_id=$2',[req.params.uid,req.user.id]);
+  const peerPrivacy=parsePrivacy(peerRead.rows[0]||{});
+  const peerLastRead=peerPrivacy.readReceipts===false?0:Number(peerRead.rows[0]?.last_read_at||0);
   const ids=r.rows.map(m=>m.id);
   let rx=[];
   if(ids.length){const q=await pool.query('SELECT message_id,user_id,emoji FROM reactions WHERE message_id=ANY($1)',[ids]);rx=q.rows;}
@@ -983,6 +994,8 @@ app.get('/api/messages/search',auth,async(req,res)=>{
  res.json(r.rows.map(m=>({id:m.id,from:m.from,to:m.to,text:m.text,createdAt:Number(m.created_at),author:m.name,username:m.username})));
 });
 app.post('/api/messages/:uid/read',auth,async(req,res)=>{
+ const current=await getUser(req.user.id);if(!current)return res.status(404).json({error:'Пользователь не найден'});
+ const privacy=parsePrivacy(current);if(privacy.readReceipts===false)return res.json({ok:true,readAt:null,hidden:true});
  const now=Date.now();await pool.query(`INSERT INTO conversation_reads(user_id,peer_id,last_read_at) VALUES($1,$2,$3)
  ON CONFLICT(user_id,peer_id) DO UPDATE SET last_read_at=EXCLUDED.last_read_at`,[req.user.id,req.params.uid,now]);
  io.to(req.params.uid).emit('read',{from:req.user.id,readAt:now});
@@ -994,7 +1007,7 @@ io.on('connection',async socket=>{
   if(!u)return socket.disconnect(true);
   await pool.query('UPDATE users SET online=true,last_seen=NULL WHERE id=$1',[u.id]);
   socket.join(u.id);
-  io.emit('presence',{userId:u.id,online:true,lastSeen:null});
+  io.emit('presence',await presenceFor(u.id,true,null));
   socket.on('call:offer',d=>{
     if(!d?.to||!d?.offer)return;
     io.to(String(d.to)).emit('call:offer',{from:u.id,fromUser:publicUser(u),offer:d.offer});
@@ -1048,7 +1061,7 @@ io.on('connection',async socket=>{
   });
   socket.on('typing',d=>{if(d?.to)io.to(d.to).emit('typing',{from:u.id,typing:!!d.typing});});
   socket.on('read',d=>{if(d?.to)io.to(d.to).emit('read',{from:u.id});});
-  socket.on('disconnect',async()=>{const seen=Date.now();await pool.query('UPDATE users SET online=false,last_seen=$1 WHERE id=$2',[seen,u.id]).catch(()=>{});io.emit('presence',{userId:u.id,online:false,lastSeen:seen});});
+  socket.on('disconnect',async()=>{const seen=Date.now();await pool.query('UPDATE users SET online=false,last_seen=$1 WHERE id=$2',[seen,u.id]).catch(()=>{});io.emit('presence',await presenceFor(u.id,false,seen).catch(()=>({userId:u.id,online:false,lastSeen:null})));});
 });
 
 app.get('/',(req,res)=>{res.set('Cache-Control','no-store, no-cache, must-revalidate, proxy-revalidate');res.set('Pragma','no-cache');res.set('Expires','0');res.sendFile(path.join(ROOT,'index.html'));});
