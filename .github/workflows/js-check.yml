@@ -21,3 +21,5 @@ jobs:
           PY
       - name: Check syntax
         run: node --check /tmp/scripts.js
+      - name: Check server syntax
+        run: node --check server.js
