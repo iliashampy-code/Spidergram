@@ -145,9 +145,10 @@ function currentReward(days){
 }
 function currentVisitStreak(u){const st=parseJson(u?.task_state,{}),dates=Array.isArray(st?.claimed?._visitDates)?[...new Set(st.claimed._visitDates.map(String))].sort().reverse():[];if(!dates.length)return 0;const today=new Date().toISOString().slice(0,10);const dayNum=d=>Math.floor(Date.parse(d+'T12:00:00Z')/86400000);if(dayNum(today)-dayNum(dates[0])>1)return 0;let count=1;for(let i=1;i<dates.length;i++){if(dayNum(dates[i-1])-dayNum(dates[i])===1)count++;else break;}return count;}
 let adminDisplaySettings={showLastSeen:true,showOnlineStatus:true,readReceipts:true};
-const parsePrivacy=u=>{try{return {...{showOnlineStatus:true,showLastSeen:true,readReceipts:true},...(typeof u.privacy_settings==='string'?JSON.parse(u.privacy_settings):(u.privacy_settings||{}))}}catch{return {showOnlineStatus:true,showLastSeen:true,readReceipts:true}}};
-const publicUser=u=>{const privacy=parsePrivacy(u);return {id:u.id,username:u.username,name:u.name||u.username,avatar:u.avatar||'',online:adminDisplaySettings.showOnlineStatus&&privacy.showOnlineStatus!==false&&!!u.online,lastSeen:adminDisplaySettings.showLastSeen&&privacy.showLastSeen!==false?(u.last_seen||null):null,privacySettings:privacy,customTitle:u.custom_title||'',adminCheck:!!u.admin_check,selectedTitle:u.selected_title||'',titleAwards:(()=>{try{return JSON.parse(u.title_awards||'[]')}catch{return[]}})(),customColorEnabled:!!u.custom_color_enabled,days:Math.max(0,Math.floor((Date.now()-Number(u.created_at||Date.now()))/86400000)),streak:currentVisitStreak(u),title:currentReward(Math.max(0,Math.floor((Date.now()-Number(u.created_at||Date.now()))/86400000)))}};
-const presenceFor=async(userId,online,lastSeen)=>{const r=await pool.query('SELECT privacy_settings FROM users WHERE id=$1',[userId]);const p=parsePrivacy(r.rows[0]||{});return {userId,online:adminDisplaySettings.showOnlineStatus&&p.showOnlineStatus!==false&&!!online,lastSeen:adminDisplaySettings.showLastSeen&&p.showLastSeen!==false?lastSeen:null}};
+const parsePrivacy=u=>{try{return {...{showOnlineStatus:true,showLastSeen:true,readReceipts:true,adminForceOnlineStatus:false,adminForceLastSeen:false,adminForceReadReceipts:false},...(typeof u.privacy_settings==='string'?JSON.parse(u.privacy_settings):(u.privacy_settings||{}))}}catch{return {showOnlineStatus:true,showLastSeen:true,readReceipts:true,adminForceOnlineStatus:false,adminForceLastSeen:false,adminForceReadReceipts:false}}};
+const privacyAllows=(p,key,forcedKey)=>!!p[forcedKey]||p[key]!==false;
+const publicUser=u=>{const privacy=parsePrivacy(u);return {id:u.id,username:u.username,name:u.name||u.username,avatar:u.avatar||'',online:privacyAllows(privacy,'showOnlineStatus','adminForceOnlineStatus')&&!!u.online,lastSeen:privacyAllows(privacy,'showLastSeen','adminForceLastSeen')?(u.last_seen||null):null,privacySettings:privacy,customTitle:u.custom_title||'',adminCheck:!!u.admin_check,selectedTitle:u.selected_title||'',titleAwards:(()=>{try{return JSON.parse(u.title_awards||'[]')}catch{return[]}})(),customColorEnabled:!!u.custom_color_enabled,days:Math.max(0,Math.floor((Date.now()-Number(u.created_at||Date.now()))/86400000)),streak:currentVisitStreak(u),title:currentReward(Math.max(0,Math.floor((Date.now()-Number(u.created_at||Date.now()))/86400000)))}};
+const presenceFor=async(userId,online,lastSeen)=>{const r=await pool.query('SELECT privacy_settings FROM users WHERE id=$1',[userId]);const p=parsePrivacy(r.rows[0]||{});return {userId,online:privacyAllows(p,'showOnlineStatus','adminForceOnlineStatus')&&!!online,lastSeen:privacyAllows(p,'showLastSeen','adminForceLastSeen')?lastSeen:null}};
 const makeToken=u=>jwt.sign({id:u.id},SECRET,{expiresIn:'30d'});
 
 async function initDb(){
@@ -607,6 +608,7 @@ async function requireOwnerAdmin(req,res){const u=await getUser(req.user.id);if(
 app.get('/api/admin/display-settings',auth,async(req,res)=>{const admin=await requireOwnerAdmin(req,res);if(!admin)return;res.json(adminDisplaySettings)});
 app.patch('/api/admin/display-settings',auth,async(req,res)=>{const admin=await requireOwnerAdmin(req,res);if(!admin)return;const b=req.body||{};const next={showLastSeen:typeof b.showLastSeen==='boolean'?b.showLastSeen:adminDisplaySettings.showLastSeen,showOnlineStatus:typeof b.showOnlineStatus==='boolean'?b.showOnlineStatus:adminDisplaySettings.showOnlineStatus,readReceipts:typeof b.readReceipts==='boolean'?b.readReceipts:adminDisplaySettings.readReceipts};await pool.query('UPDATE admin_display_settings SET show_last_seen=$1,show_online_status=$2,read_receipts=$3 WHERE id=1',[next.showLastSeen,next.showOnlineStatus,next.readReceipts]);adminDisplaySettings=next;io.emit('admin:display-settings',next);res.json(next)});
 app.get('/api/admin/users',auth,async(req,res)=>{const admin=await requireOwnerAdmin(req,res);if(!admin)return;const q=String(req.query.q||'').trim().toLowerCase();const r=await pool.query("SELECT * FROM users WHERE ($1='' OR username ILIKE '%'||$1||'%' OR name ILIKE '%'||$1||'%') ORDER BY username LIMIT 50",[q]);res.json(r.rows.map(x=>({...publicUser(x),currency:Number(x.currency||0)})))});
+ app.patch('/api/admin/users/:id/privacy-force',auth,async(req,res)=>{const admin=await requireOwnerAdmin(req,res);if(!admin)return;const target=await getUser(req.params.id);if(!target)return res.status(404).json({error:'Пользователь не найден'});const p=parsePrivacy(target),b=req.body||{};for(const k of ['adminForceOnlineStatus','adminForceLastSeen','adminForceReadReceipts'])if(typeof b[k]==='boolean')p[k]=b[k];await pool.query('UPDATE users SET privacy_settings=$1 WHERE id=$2',[JSON.stringify(p),target.id]);const fresh=await getUser(target.id);io.emit('presence',await presenceFor(target.id,!!fresh.online,fresh.last_seen||null));res.json(publicUser(fresh))});
 app.post('/api/promo/redeem',auth,async(req,res)=>{
  const code=String(req.body.code||'').trim().toUpperCase();
  if(!code)return res.status(400).json({error:'Введите промокод'});
@@ -908,7 +910,7 @@ app.get('/api/messages/:uid',auth,async(req,res)=>{
   const r=await pool.query(`SELECT id,"from","to",text,type,media_url,created_at,edited,deleted FROM messages WHERE ("from"=$1 AND "to"=$2) OR ("from"=$2 AND "to"=$1) ORDER BY created_at DESC LIMIT 300`,[req.user.id,req.params.uid]);
   const peerRead=await pool.query('SELECT cr.last_read_at,u.privacy_settings FROM conversation_reads cr JOIN users u ON u.id=cr.user_id WHERE cr.user_id=$1 AND cr.peer_id=$2',[req.params.uid,req.user.id]);
   const peerPrivacy=parsePrivacy(peerRead.rows[0]||{});
-  const peerLastRead=(!adminDisplaySettings.readReceipts||peerPrivacy.readReceipts===false)?0:Number(peerRead.rows[0]?.last_read_at||0);
+  const peerLastRead=(!privacyAllows(peerPrivacy,'readReceipts','adminForceReadReceipts'))?0:Number(peerRead.rows[0]?.last_read_at||0);
   const ids=r.rows.map(m=>m.id);
   let rx=[];
   if(ids.length){const q=await pool.query('SELECT message_id,user_id,emoji FROM reactions WHERE message_id=ANY($1)',[ids]);rx=q.rows;}
@@ -1002,10 +1004,10 @@ app.get('/api/messages/search',auth,async(req,res)=>{
 });
 app.post('/api/messages/:uid/read',auth,async(req,res)=>{
  const current=await getUser(req.user.id);if(!current)return res.status(404).json({error:'Пользователь не найден'});
- const privacy=parsePrivacy(current);if(!adminDisplaySettings.readReceipts||privacy.readReceipts===false)return res.json({ok:true,readAt:null,hidden:true});
+ const privacy=parsePrivacy(current);if(!privacyAllows(privacy,'readReceipts','adminForceReadReceipts'))return res.json({ok:true,readAt:null,hidden:true});
  const now=Date.now();await pool.query(`INSERT INTO conversation_reads(user_id,peer_id,last_read_at) VALUES($1,$2,$3)
  ON CONFLICT(user_id,peer_id) DO UPDATE SET last_read_at=EXCLUDED.last_read_at`,[req.user.id,req.params.uid,now]);
- if(adminDisplaySettings.readReceipts)io.to(req.params.uid).emit('read',{from:req.user.id,readAt:now});
+ if(privacyAllows(privacy,'readReceipts','adminForceReadReceipts'))io.to(req.params.uid).emit('read',{from:req.user.id,readAt:now});
  res.json({ok:true,readAt:now});
 });
 io.use((socket,next)=>{try{socket.user=jwt.verify(socket.handshake.auth?.token||'',SECRET);next();}catch{next(new Error('Unauthorized'));}});
